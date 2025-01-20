@@ -1,14 +1,15 @@
 import dbInit from '../helpers/database-init';
 import getLogger from '../../fixtures/no-logger';
 import assert from 'assert';
-import User from '../../../lib/types/user';
 import { randomId } from '../../../lib/util/random-id';
-import {
+import type {
     IConstraint,
     IFeatureToggleClient,
     ISegment,
 } from '../../../lib/types/model';
-import { IUnleashTest, setupApp } from '../helpers/test-helper';
+import { type IUnleashTest, setupApp } from '../helpers/test-helper';
+import type { UpsertSegmentSchema } from '../../../lib/openapi';
+import { TEST_AUDIT_USER } from '../../../lib/types';
 
 interface ISeedSegmentSpec {
     featuresCount: number;
@@ -32,30 +33,23 @@ const fetchSegments = (app: IUnleashTest): Promise<ISegment[]> => {
     return app.services.segmentService.getAll();
 };
 
-const fetchFeatures = (app: IUnleashTest): Promise<IFeatureToggleClient[]> => {
-    return app.request
-        .get('/api/admin/features')
-        .expect(200)
-        .then((res) => res.body.features);
-};
-
 const createSegment = (
     app: IUnleashTest,
-    postData: object,
+    postData: UpsertSegmentSchema,
 ): Promise<unknown> => {
-    const user = { email: 'test@example.com' } as User;
-    return app.services.segmentService.create(postData, user);
+    return app.services.segmentService.create(postData, TEST_AUDIT_USER);
 };
 
 const createFeatureToggle = (
     app: IUnleashTest,
     postData: object,
     expectStatusCode = 201,
-): Promise<unknown> => {
+): Promise<IFeatureToggleClient> => {
     return app.request
         .post('/api/admin/features')
         .send(postData)
-        .expect(expectStatusCode);
+        .expect(expectStatusCode)
+        .then((res) => res.body);
 };
 
 const addSegmentToStrategy = (
@@ -86,7 +80,7 @@ const seedConstraints = (spec: ISeedSegmentSpec): IConstraint[] => {
     }));
 };
 
-const seedSegments = (spec: ISeedSegmentSpec): Partial<ISegment>[] => {
+const seedSegments = (spec: ISeedSegmentSpec): UpsertSegmentSchema[] => {
     return Array.from({ length: spec.segmentsPerFeature }).map((v, i) => {
         return {
             name: `${seedSchema}_segment_${i}`,
@@ -115,13 +109,12 @@ const seedSegmentsDatabase = async (
         }),
     );
 
-    await Promise.all(
-        seedFeatures(spec).map((seed) => {
+    const features = await Promise.all(
+        seedFeatures(spec).map(async (seed) => {
             return createFeatureToggle(app, seed);
         }),
     );
 
-    const features = await fetchFeatures(app);
     const segments = await fetchSegments(app);
     assert(features.length === spec.featuresCount);
     assert(segments.length === spec.segmentsPerFeature);

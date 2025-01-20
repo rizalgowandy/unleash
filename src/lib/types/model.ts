@@ -1,11 +1,25 @@
-import { ITagType } from './stores/tag-type-store';
-import { LogProvider } from '../logger';
-import { IRole } from './stores/access-store';
-import { IUser } from './user';
+import type { ITagType } from '../features/tag-type/tag-type-store-type';
+import type { LogProvider } from '../logger';
+import type { IRole } from './stores/access-store';
+import type { IUser } from './user';
+import type { ALL_OPERATORS } from '../util';
+import type { IProjectStats } from '../features/project/project-service';
+import type {
+    CreateFeatureStrategySchema,
+    ProjectOverviewSchema,
+} from '../openapi';
+import type { ProjectEnvironment } from '../features/project/project-store-type';
+import type { FeatureSearchEnvironmentSchema } from '../openapi/spec/feature-search-environment-schema';
+import type { IntegrationEventsService } from '../features/integration-events/integration-events-service';
+import type { IFlagResolver } from './experimental';
+import type { Collaborator } from '../features/feature-toggle/types/feature-collaborators-read-model-type';
+import type { EventEmitter } from 'events';
+
+export type Operator = (typeof ALL_OPERATORS)[number];
 
 export interface IConstraint {
     contextName: string;
-    operator: string;
+    operator: Operator;
     values?: string[];
     value?: string;
     inverted?: boolean;
@@ -18,9 +32,15 @@ export enum WeightType {
 export interface IStrategyConfig {
     id?: string;
     name: string;
-    constraints: IConstraint[];
-    parameters: object;
+    featureName?: string;
+    constraints?: IConstraint[];
+    variants?: IStrategyVariant[];
+    segments?: number[];
+    parameters?: { [key: string]: string };
     sortOrder?: number;
+    milestoneId?: string;
+    title?: string | null;
+    disabled?: boolean | null;
 }
 export interface IFeatureStrategy {
     id: string;
@@ -28,10 +48,15 @@ export interface IFeatureStrategy {
     projectId: string;
     environment: string;
     strategyName: string;
-    parameters: object;
+    parameters: { [key: string]: string };
     sortOrder?: number;
+    milestoneId?: string;
     constraints: IConstraint[];
+    variants?: IStrategyVariant[];
     createdAt?: Date;
+    segments?: number[];
+    title?: string | null;
+    disabled?: boolean | null;
 }
 
 export interface FeatureToggleDTO {
@@ -40,15 +65,28 @@ export interface FeatureToggleDTO {
     type?: string;
     stale?: boolean;
     archived?: boolean;
+    archivedAt?: Date;
     createdAt?: Date;
     impressionData?: boolean;
+    variants?: IVariant[];
+    tags?: ITag[];
+    createdByUserId?: number;
+    createdBy?: {
+        id: number;
+        name: string;
+        imageUrl: string;
+    };
 }
 
 export interface FeatureToggle extends FeatureToggleDTO {
     project: string;
     lastSeenAt?: Date;
     createdAt?: Date;
-    variants?: IVariant[];
+}
+
+export interface IFeatureToggleListItem extends FeatureToggle {
+    environments?: Partial<IEnvironmentBase>[];
+    favorite: boolean;
 }
 
 export interface IFeatureToggleClient {
@@ -59,10 +97,13 @@ export interface IFeatureToggleClient {
     stale: boolean;
     variants: IVariant[];
     enabled: boolean;
-    strategies: IStrategyConfig[];
+    strategies: Omit<IStrategyConfig, 'disabled'>[];
+    dependencies?: IDependency[];
     impressionData?: boolean;
     lastSeenAt?: Date;
     createdAt?: Date;
+    tags?: ITag[];
+    favorite?: boolean;
 }
 
 export interface IFeatureEnvironmentInfo {
@@ -70,10 +111,18 @@ export interface IFeatureEnvironmentInfo {
     environment: string;
     enabled: boolean;
     strategies: IFeatureStrategy[];
+    defaultStrategy: CreateFeatureStrategySchema | null;
 }
 
 export interface FeatureToggleWithEnvironment extends FeatureToggle {
     environments: IEnvironmentDetail[];
+}
+
+export interface FeatureToggleView extends FeatureToggleWithEnvironment {
+    dependencies: IDependency[];
+    children: string[];
+    lifecycle: IFeatureLifecycleStage | undefined;
+    collaborators?: { users: Collaborator[] };
 }
 
 // @deprecated
@@ -82,8 +131,9 @@ export interface FeatureToggleLegacy extends FeatureToggle {
     enabled: boolean;
 }
 
-export interface IEnvironmentDetail extends IEnvironmentOverview {
+export interface IEnvironmentDetail extends IEnvironmentBase {
     strategies: IStrategyConfig[];
+    variants: IVariant[];
 }
 
 export interface ISortOrder {
@@ -94,14 +144,16 @@ export interface IFeatureEnvironment {
     environment: string;
     featureName: string;
     enabled: boolean;
+    lastSeenAt?: Date;
+    variants?: IVariant[];
 }
 
 export interface IVariant {
     name: string;
     weight: number;
-    weightType: string;
+    weightType: 'variable' | 'fix';
     payload?: {
-        type: string;
+        type: 'json' | 'csv' | 'string' | 'number';
         value: string;
     };
     stickiness: string;
@@ -111,12 +163,53 @@ export interface IVariant {
     }[];
 }
 
+export interface IDependency {
+    feature: string;
+    variants?: string[];
+    enabled?: boolean;
+}
+
+export type StageName =
+    | 'initial'
+    | 'pre-live'
+    | 'live'
+    | 'completed'
+    | 'archived';
+
+export interface IFeatureLifecycleStage {
+    stage: StageName;
+    enteredStageAt: Date;
+    status?: string;
+}
+
+export type IProjectLifecycleStageDuration = {
+    duration: number;
+    project: string;
+    stage: StageName;
+};
+
+export interface IFeatureDependency {
+    feature: string;
+    dependency: IDependency;
+}
+
+export type IStrategyVariant = Omit<IVariant, 'overrides'>;
+
 export interface IEnvironment {
     name: string;
     type: string;
     sortOrder: number;
     enabled: boolean;
     protected: boolean;
+    projectCount?: number;
+    apiTokenCount?: number;
+    enabledToggleCount?: number;
+}
+
+export interface IProjectEnvironment extends IEnvironment {
+    projectApiTokenCount?: number;
+    projectEnabledToggleCount?: number;
+    defaultStrategy?: CreateFeatureStrategySchema;
 }
 
 export interface IEnvironmentCreate {
@@ -126,34 +219,110 @@ export interface IEnvironmentCreate {
     enabled?: boolean;
 }
 
-export interface IEnvironmentOverview {
+export interface IEnvironmentClone {
+    name: string;
+    projects?: string[];
+    type: string;
+    clonePermissions?: boolean;
+}
+
+export interface IEnvironmentBase {
     name: string;
     enabled: boolean;
     type: string;
     sortOrder: number;
+    lastSeenAt: Date;
+}
+
+export interface IEnvironmentOverview extends IEnvironmentBase {
+    variantCount: number;
+    hasStrategies?: boolean;
+    hasEnabledStrategies?: boolean;
+    yes?: number;
+    no?: number;
 }
 
 export interface IFeatureOverview {
     name: string;
+    description: string;
+    project: string;
+    favorite: boolean;
+    impressionData: boolean;
+    segments: string[];
     type: string;
     stale: boolean;
     createdAt: Date;
     lastSeenAt: Date;
     environments: IEnvironmentOverview[];
+    lifecycle?: IFeatureLifecycleStage;
+}
+
+export type IFeatureSearchOverview = Exclude<
+    IFeatureOverview,
+    'environments'
+> & {
+    dependencyType: 'parent' | 'child' | null;
+    environments: FeatureSearchEnvironmentSchema[];
+    archivedAt: string;
+    createdBy: {
+        id: number;
+        name: string;
+        imageUrl: string;
+    };
+};
+
+export interface IFeatureTypeCount {
+    type: string;
+    count: number;
+}
+
+export type ProjectMode = 'open' | 'protected' | 'private';
+
+export interface IFeatureNaming {
+    pattern: string | null;
+    example?: string | null;
+    description?: string | null;
+}
+
+export interface IProjectHealth {
+    name: string;
+    description: string;
+    environments: ProjectEnvironment[];
+    features: IFeatureOverview[];
+    members: number;
+    version: number;
+    health: number;
+    favorite?: boolean;
+    updatedAt?: Date;
+    createdAt: Date | undefined;
+    stats?: IProjectStats;
+    mode: ProjectMode;
+    featureLimit?: number;
+    featureNaming?: IFeatureNaming;
+    defaultStickiness: string;
 }
 
 export interface IProjectOverview {
     name: string;
     description: string;
-    environments: string[];
-    features: IFeatureOverview[];
+    environments: ProjectEnvironment[];
+    featureTypeCounts: IFeatureTypeCount[];
     members: number;
     version: number;
     health: number;
+    favorite?: boolean;
     updatedAt?: Date;
+    archivedAt?: Date;
+    createdAt: Date | undefined;
+    stats?: IProjectStats;
+    mode: ProjectMode;
+    featureLimit?: number;
+    featureNaming?: IFeatureNaming;
+    defaultStickiness: string;
+    onboardingStatus: ProjectOverviewSchema['onboardingStatus'];
 }
 
-export interface IProjectHealthReport extends IProjectOverview {
+export interface IProjectHealthReport extends IProjectHealth {
     staleCount: number;
     potentiallyStaleCount: number;
     activeCount: number;
@@ -175,6 +344,12 @@ export interface IFeatureToggleQuery {
     project?: string[];
     namePrefix?: string;
     environment?: string;
+    inlineSegmentConstraints?: boolean;
+}
+
+export interface IFeatureToggleDeltaQuery extends IFeatureToggleQuery {
+    toggleNames?: string[];
+    environment: string;
 }
 
 export interface ITag {
@@ -182,7 +357,7 @@ export interface ITag {
     type: string;
 }
 
-export interface IParameterDefinition {
+export interface IAddonParameterDefinition {
     name: string;
     displayName: string;
     type: string;
@@ -197,14 +372,32 @@ export interface IAddonDefinition {
     displayName: string;
     documentationUrl: string;
     description: string;
-    parameters?: IParameterDefinition[];
+    deprecated?: string;
+    parameters?: IAddonParameterDefinition[];
     events?: string[];
     tagTypes?: ITagType[];
+    installation?: IAddonInstallation;
+    alerts?: IAddonAlert[];
+    howTo?: string;
+}
+
+export interface IAddonInstallation {
+    url: string;
+    title?: string;
+    helpText?: string;
+}
+
+export interface IAddonAlert {
+    type: 'success' | 'info' | 'warning' | 'error';
+    text: string;
 }
 
 export interface IAddonConfig {
     getLogger: LogProvider;
     unleashUrl: string;
+    integrationEventsService: IntegrationEventsService;
+    flagResolver: IFlagResolver;
+    eventBus: EventEmitter;
 }
 
 export interface IUserWithRole {
@@ -214,6 +407,7 @@ export interface IUserWithRole {
     username?: string;
     email?: string;
     imageUrl?: string;
+    addedAt: Date;
 }
 
 export interface IRoleData {
@@ -223,6 +417,7 @@ export interface IRoleData {
 }
 
 export interface IAvailablePermissions {
+    root: IPermission[];
     project: IPermission[];
     environments: IEnvironmentPermission[];
 }
@@ -232,7 +427,7 @@ export interface IPermission {
     name: string;
     displayName: string;
     type: string;
-    environment?: string;
+    environment?: string | null;
 }
 
 export interface IEnvironmentPermission {
@@ -246,7 +441,6 @@ export enum PermissionType {
 }
 
 export enum RoleName {
-    // eslint-disable-next-line @typescript-eslint/no-shadow
     ADMIN = 'Admin',
     EDITOR = 'Editor',
     VIEWER = 'Viewer',
@@ -256,6 +450,7 @@ export enum RoleName {
 
 export enum RoleType {
     ROOT = 'root',
+    ROOT_CUSTOM = 'root-custom',
     PROJECT = 'project',
 }
 
@@ -272,13 +467,16 @@ export interface IClientApp {
     seenToggles?: string[];
     metricsCount?: number;
     strategies?: string[] | Record<string, string>[];
-    bucket?: any;
     count?: number;
-    started?: number | Date;
+    started?: string | number | Date;
     interval?: number;
     icon?: string;
     description?: string;
     color?: string;
+    platformName?: string;
+    platformVersion?: string;
+    yggdrasilVersion?: string;
+    specVersion?: string;
 }
 
 export interface IAppFeature {
@@ -307,49 +505,97 @@ export interface IMetricCounts {
 export interface IMetricsBucket {
     start: Date;
     stop: Date;
-    toggles: IMetricCounts;
+    toggles: { [key: string]: IMetricCounts };
 }
 
-export interface IImportFile extends ImportCommon {
-    file: string;
-}
+// Create project aligns with #/components/schemas/createProjectSchema
+// joi is providing default values when the optional inputs are not provided
+// const data = await projectSchema.validateAsync(newProject);
+export type CreateProject = Pick<IProject, 'name'> & {
+    id?: string;
+    mode?: ProjectMode;
+    defaultStickiness?: string;
+    environments?: string[];
+    changeRequestEnvironments?: { name: string; requiredApprovals?: number }[];
+};
 
-interface ImportCommon {
-    dropBeforeImport?: boolean;
-    keepExisting?: boolean;
-    userName?: string;
-}
-
-export interface IImportData extends ImportCommon {
-    data: any;
-}
+// Create project aligns with #/components/schemas/projectCreatedSchema
+export type ProjectCreated = Pick<
+    IProject,
+    | 'id'
+    | 'name'
+    | 'mode'
+    | 'defaultStickiness'
+    | 'description'
+    | 'featureLimit'
+> & {
+    environments: string[];
+    changeRequestEnvironments?: { name: string; requiredApprovals: number }[];
+};
 
 export interface IProject {
     id: string;
     name: string;
-    description: string;
+    description?: string;
     health?: number;
     createdAt?: Date;
     updatedAt?: Date;
+    archivedAt?: Date;
+    changeRequestsEnabled?: boolean;
+    mode: ProjectMode;
+    defaultStickiness: string;
+    featureLimit?: number;
+    featureNaming?: IFeatureNaming;
 }
 
-export interface ICustomRole {
-    id: number;
+export interface IProjectApplications {
+    applications: IProjectApplication[];
+    total: number;
+}
+
+export interface IProjectApplication {
     name: string;
-    description: string;
-    type: string;
+    environments: string[];
+    instances: string[];
+    sdks: IProjectApplicationSdk[];
 }
 
-export interface IProjectWithCount extends IProject {
-    featureCount: number;
-    memberCount: number;
+export interface IProjectApplicationSdk {
+    name: string;
+    versions: string[];
+}
+
+// mimics UpdateProjectSchema
+export interface IProjectUpdate {
+    id: string;
+    name: string;
+    description?: string;
+    mode?: ProjectMode;
+    defaultStickiness?: string;
+    featureLimit?: number;
+}
+
+/**
+ * Extends IRole making description mandatory
+ */
+export interface ICustomRole extends IRole {
+    description: string;
+}
+
+export interface IClientSegment {
+    id: number;
+    constraints: IConstraint[];
+    name: string;
 }
 
 export interface ISegment {
     id: number;
     name: string;
     description?: string;
+    project?: string;
     constraints: IConstraint[];
+    usedInProjects?: number;
+    usedInFeatures?: number;
     createdBy?: string;
     createdAt: Date;
 }
@@ -357,4 +603,29 @@ export interface ISegment {
 export interface IFeatureStrategySegment {
     featureStrategyId: string;
     segmentId: number;
+}
+
+export interface IUserAccessOverview {
+    userId: number;
+    createdAt?: Date;
+    userName?: string;
+    userEmail: number;
+    lastSeen?: Date;
+    accessibleProjects: string[];
+    groups: string[];
+    rootRole: string;
+    groupProjects: string[];
+}
+
+export interface ISdkHeartbeat {
+    sdkVersion: string;
+    sdkName: string;
+    metadata: ISdkHeartbeatMetadata;
+}
+
+export interface ISdkHeartbeatMetadata {
+    platformName?: string;
+    platformVersion?: string;
+    yggdrasilVersion?: string;
+    specVersion?: string;
 }

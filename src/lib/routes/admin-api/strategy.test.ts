@@ -5,8 +5,6 @@ import permissions from '../../../test/fixtures/permissions';
 import getApp from '../../app';
 import { createServices } from '../../services';
 
-let destroy;
-
 async function getSetup() {
     const randomBase = `/random${Math.round(Math.random() * 1000)}`;
     const perms = permissions();
@@ -18,12 +16,6 @@ async function getSetup() {
     const services = createServices(stores, config);
     const app = await getApp(config, stores, services);
 
-    destroy = () => {
-        services.versionService.destroy();
-        services.clientInstanceService.destroy();
-        services.apiTokenService.destroy();
-    };
-
     return {
         base: randomBase,
         strategyStore: stores.strategyStore,
@@ -31,10 +23,6 @@ async function getSetup() {
         perms,
     };
 }
-
-afterEach(() => {
-    destroy();
-});
 
 test('add version numbers for /strategies', async () => {
     const { request, base } = await getSetup();
@@ -54,23 +42,24 @@ test('require a name when creating a new strategy', async () => {
         .send({})
         .expect(400)
         .expect((res) => {
-            expect(res.body.details[0].message === '"name" is required').toBe(
-                true,
-            );
+            expect(
+                ['name', 'property', 'required'].every((word) =>
+                    res.body.details[0].message.includes(word),
+                ),
+            ).toBeTruthy();
         });
 });
 
 test('require parameters array when creating a new strategy', async () => {
     const { request, base } = await getSetup();
-    return request
+    const { body } = await request
         .post(`${base}/api/admin/strategies`)
         .send({ name: 'TestStrat' })
-        .expect(400)
-        .expect((res) => {
-            expect(res.body.details[0].message).toEqual(
-                '"parameters" is required',
-            );
-        });
+        .expect(400);
+
+    const detailsDescription = body.details[0].message;
+    expect(detailsDescription).toEqual(expect.stringMatching('parameters'));
+    expect(detailsDescription).toEqual(expect.stringMatching('required'));
 });
 
 test('create a new strategy with empty parameters', async () => {
@@ -207,12 +196,4 @@ test('reactivating a non-existent strategy yields 404', async () => {
         .post(`${base}/api/admin/strategies/non-existent-strategy/reactivate`)
         .set('Content-Type', 'application/json')
         .expect(404);
-});
-test("deprecating 'default' strategy will yield 403", async () => {
-    jest.spyOn(global.console, 'error').mockImplementation(() => jest.fn());
-    const { request, base } = await getSetup();
-    return request
-        .post(`${base}/api/admin/strategies/default/deprecate`)
-        .set('Content-Type', 'application/json')
-        .expect(403);
 });

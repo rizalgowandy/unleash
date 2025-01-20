@@ -1,23 +1,21 @@
-export default class PasswordUndefinedError extends Error {
-    constructor() {
-        super();
-        Error.captureStackTrace(this, this.constructor);
+import { type ApiErrorSchema, UnleashError } from './unleash-error';
 
-        this.name = this.constructor.name;
-        this.message = 'Password cannot be empty or undefined';
+export default class PasswordUndefinedError extends UnleashError {
+    statusCode = 400;
+
+    constructor() {
+        super('Password cannot be empty or undefined');
     }
 
-    toJSON(): any {
-        const obj = {
-            isJoi: true,
-            name: this.constructor.name,
+    toJSON(): ApiErrorSchema {
+        return {
+            ...super.toJSON(),
             details: [
                 {
                     validationErrors: [],
-                    message: 'Password cannot be empty or undefined',
+                    message: this.message,
                 },
             ],
         };
-        return obj;
     }
 }

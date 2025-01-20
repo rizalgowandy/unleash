@@ -1,11 +1,15 @@
-import { Knex } from 'knex';
-import EventEmitter from 'events';
-import { Logger, LogProvider } from '../logger';
-import { IAddon, IAddonDto, IAddonStore } from '../types/stores/addon-store';
+import type EventEmitter from 'events';
+import type { Logger, LogProvider } from '../logger';
+import type {
+    IAddon,
+    IAddonDto,
+    IAddonStore,
+} from '../types/stores/addon-store';
 
 import metricsHelper from '../util/metrics-helper';
 import { DB_TIME } from '../metric-events';
 import NotFoundError from '../error/notfound-error';
+import type { Db } from './db';
 
 const COLUMNS = [
     'id',
@@ -14,17 +18,20 @@ const COLUMNS = [
     'description',
     'parameters',
     'events',
+    'projects',
+    'environments',
+    'created_at',
 ];
 const TABLE = 'addons';
 
 export default class AddonStore implements IAddonStore {
-    private db: Knex;
+    private db: Db;
 
     private logger: Logger;
 
     private readonly timer: Function;
 
-    constructor(db: Knex, eventBus: EventEmitter, getLogger: LogProvider) {
+    constructor(db: Db, eventBus: EventEmitter, getLogger: LogProvider) {
         this.db = db;
         this.logger = getLogger('addons-store.ts');
         this.timer = (action) =>
@@ -69,18 +76,19 @@ export default class AddonStore implements IAddonStore {
         stopTimer();
         // eslint-disable-next-line @typescript-eslint/naming-convention
         const { id, created_at } = rows[0];
-        return { id, createdAt: created_at, ...addon };
+        return this.rowToAddon({ id, createdAt: created_at, ...addon });
     }
 
     async update(id: number, addon: IAddonDto): Promise<IAddon> {
         const rows = await this.db(TABLE)
             .where({ id })
-            .update(this.addonToRow(addon));
+            .update(this.addonToRow(addon))
+            .returning(COLUMNS);
 
         if (!rows) {
             throw new NotFoundError('Could not find addon');
         }
-        return rows[0];
+        return this.rowToAddon(rows[0]);
     }
 
     async delete(id: number): Promise<void> {
@@ -112,9 +120,11 @@ export default class AddonStore implements IAddonStore {
             id: row.id,
             provider: row.provider,
             enabled: row.enabled,
-            description: row.description,
+            description: row.description ?? null,
             parameters: row.parameters,
             events: row.events,
+            projects: row.projects || [],
+            environments: row.environments || [],
             createdAt: row.created_at,
         };
     }
@@ -127,6 +137,8 @@ export default class AddonStore implements IAddonStore {
             description: addon.description,
             parameters: JSON.stringify(addon.parameters),
             events: JSON.stringify(addon.events),
+            projects: JSON.stringify(addon.projects || []),
+            environments: JSON.stringify(addon.environments || []),
         };
     }
 }

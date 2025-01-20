@@ -1,13 +1,22 @@
 import Addon from '../addons/addon';
 import getLogger from '../../test/fixtures/no-logger';
-import { IAddonDefinition } from '../types/model';
+import type { IAddonConfig, IAddonDefinition } from '../types/model';
 import {
     FEATURE_ARCHIVED,
     FEATURE_CREATED,
     FEATURE_REVIVED,
     FEATURE_UPDATED,
-    IEvent,
+    type IEvent,
 } from '../types/events';
+import type { IFlagResolver, IntegrationEventsService } from '../internals';
+
+const ARGS: IAddonConfig = {
+    getLogger,
+    unleashUrl: 'http://some-url.com',
+    integrationEventsService: {} as IntegrationEventsService,
+    flagResolver: {} as IFlagResolver,
+    eventBus: {} as any,
+};
 
 const definition: IAddonDefinition = {
     name: 'simple',
@@ -38,7 +47,7 @@ const definition: IAddonDefinition = {
             sensitive: true,
         },
     ],
-    documentationUrl: 'https:/www.example.com',
+    documentationUrl: 'https://www.example.com',
     events: [
         FEATURE_CREATED,
         FEATURE_UPDATED,
@@ -57,7 +66,7 @@ export default class SimpleAddon extends Addon {
     events: any[];
 
     constructor() {
-        super(definition, { getLogger });
+        super(definition, ARGS);
         this.events = [];
     }
 

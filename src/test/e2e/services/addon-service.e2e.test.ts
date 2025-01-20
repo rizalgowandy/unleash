@@ -1,18 +1,21 @@
-import dbInit from '../helpers/database-init';
+import dbInit, { type ITestDb } from '../helpers/database-init';
 import getLogger from '../../fixtures/no-logger';
 import { createTestConfig } from '../../config/test-config';
 import AddonService from '../../../lib/services/addon-service';
-import { IUnleashStores } from '../../../lib/types';
+import { type IUnleashStores, TEST_AUDIT_USER } from '../../../lib/types';
 
 import SimpleAddon from '../../../lib/services/addon-service-test-simple-addon';
-import TagTypeService from '../../../lib/services/tag-type-service';
+import TagTypeService from '../../../lib/features/tag-type/tag-type-service';
 import { FEATURE_CREATED } from '../../../lib/types/events';
+import { IntegrationEventsService } from '../../../lib/services';
+import { createEventsService } from '../../../lib/features';
 
 const addonProvider = { simple: new SimpleAddon() };
 
-let db;
+let db: ITestDb;
 let stores: IUnleashStores;
 let addonService: AddonService;
+const TEST_USER_ID = -9999;
 
 beforeAll(async () => {
     const config = createTestConfig({
@@ -20,11 +23,18 @@ beforeAll(async () => {
     });
     db = await dbInit('addon_service_serial', getLogger);
     stores = db.stores;
-    const tagTypeService = new TagTypeService(stores, config);
+    const eventService = createEventsService(db.rawDatabase, config);
+    const tagTypeService = new TagTypeService(stores, config, eventService);
+    const integrationEventsService = new IntegrationEventsService(
+        stores,
+        config,
+    );
     addonService = new AddonService(
         stores,
         config,
         tagTypeService,
+        eventService,
+        integrationEventsService,
         addonProvider,
     );
 });
@@ -74,9 +84,9 @@ test('should only return active addons', async () => {
         description: '',
     };
 
-    await addonService.createAddon(config, 'me@mail.com');
-    await addonService.createAddon(config2, 'me@mail.com');
-    await addonService.createAddon(config3, 'me@mail.com');
+    await addonService.createAddon(config, TEST_AUDIT_USER);
+    await addonService.createAddon(config2, TEST_AUDIT_USER);
+    await addonService.createAddon(config3, TEST_AUDIT_USER);
 
     jest.advanceTimersByTime(61_000);
 

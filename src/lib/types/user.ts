@@ -1,5 +1,8 @@
-import gravatarUrl from 'gravatar-url';
-import Joi from 'joi';
+import Joi, { ValidationError } from 'joi';
+import { generateImageUrl } from '../util/generateImageUrl';
+
+export const AccountTypes = ['User', 'Service Account'] as const;
+type AccountType = (typeof AccountTypes)[number];
 
 export interface UserData {
     id: number;
@@ -10,6 +13,8 @@ export interface UserData {
     seenAt?: Date;
     loginAttempts?: number;
     createdAt?: Date;
+    isService?: boolean;
+    scimId?: string;
 }
 
 export interface IUser {
@@ -19,11 +24,30 @@ export interface IUser {
     email?: string;
     inviteLink?: string;
     seenAt?: Date;
-    createdAt: Date;
+    createdAt?: Date;
     permissions: string[];
-    loginAttempts: number;
+    loginAttempts?: number;
     isAPI: boolean;
-    imageUrl: string;
+    imageUrl?: string;
+    accountType?: AccountType;
+    scimId?: string;
+    deletedSessions?: number;
+    activeSessions?: number;
+}
+
+export type MinimalUser = Pick<
+    IUser,
+    'id' | 'name' | 'username' | 'email' | 'imageUrl'
+>;
+
+export interface IProjectUser extends IUser {
+    addedAt: Date;
+}
+
+export interface IAuditUser {
+    id: number;
+    username: string;
+    ip: string;
 }
 
 export default class User implements IUser {
@@ -41,11 +65,15 @@ export default class User implements IUser {
 
     imageUrl: string;
 
-    seenAt: Date;
+    seenAt?: Date;
 
-    loginAttempts: number;
+    loginAttempts?: number;
 
-    createdAt: Date;
+    createdAt?: Date;
+
+    accountType?: AccountType = 'User';
+
+    scimId?: string;
 
     constructor({
         id,
@@ -56,30 +84,35 @@ export default class User implements IUser {
         seenAt,
         loginAttempts,
         createdAt,
+        isService,
+        scimId,
     }: UserData) {
         if (!id) {
-            throw new TypeError('Id is required');
+            throw new ValidationError('Id is required', [], undefined);
         }
-        Joi.assert(email, Joi.string().email(), 'Email');
+        Joi.assert(email, Joi.string().email({ ignoreLength: true }), 'Email');
         Joi.assert(username, Joi.string(), 'Username');
         Joi.assert(name, Joi.string(), 'Name');
 
         this.id = id;
-        this.name = name;
-        this.username = username;
-        this.email = email;
+        this.name = name!;
+        this.username = username!;
+        this.email = email!;
         this.imageUrl = imageUrl || this.generateImageUrl();
         this.seenAt = seenAt;
         this.loginAttempts = loginAttempts;
         this.createdAt = createdAt;
+        this.accountType = isService ? 'Service Account' : 'User';
+        this.scimId = scimId;
     }
 
     generateImageUrl(): string {
-        return gravatarUrl(this.email || this.username || '' + this.id, {
-            size: 42,
-            default: 'retro',
-        });
+        return generateImageUrl(this);
     }
+}
+
+export interface IUserWithRootRole extends IUser {
+    rootRole: number;
 }
 
 module.exports = User;

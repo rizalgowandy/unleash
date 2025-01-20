@@ -1,149 +1,370 @@
+import Mustache from 'mustache';
 import {
-    FEATURE_CREATED,
-    FEATURE_UPDATED,
     FEATURE_ARCHIVED,
-    FEATURE_STALE_ON,
     FEATURE_STRATEGY_UPDATE,
-    FEATURE_STRATEGY_ADD,
-    FEATURE_ENVIRONMENT_ENABLED,
-    FEATURE_REVIVED,
-    FEATURE_STALE_OFF,
-    FEATURE_ENVIRONMENT_DISABLED,
-    FEATURE_STRATEGY_REMOVE,
-    FEATURE_METADATA_UPDATED,
-    FEATURE_PROJECT_CHANGE,
-    IEvent,
-    FEATURE_VARIANTS_UPDATED,
-} from '../types/events';
+    type IConstraint,
+    type IEvent,
+} from '../types';
+import { EVENT_MAP } from './feature-event-formatter-md-events';
+
+export interface IFormattedEventData {
+    label: string;
+    text: string;
+    url?: string;
+}
 
 export interface FeatureEventFormatter {
-    format: (event: IEvent) => string;
-    featureLink: (event: IEvent) => string;
+    format: (event: IEvent) => IFormattedEventData;
 }
-
 export enum LinkStyle {
-    SLACK,
-    MD,
+    SLACK = 0,
+    MD = 1,
 }
 
+type FormatStyle = 'simple' | 'markdown';
+
+interface IFeatureEventFormatterMdArgs {
+    unleashUrl: string;
+    linkStyle?: LinkStyle;
+    formatStyle?: FormatStyle;
+}
+
+// This is not only formatting feature events. And it's also not only for (proper) markdown. We should probably revisit this sometime in the future and try to split it / refactor it.
 export class FeatureEventFormatterMd implements FeatureEventFormatter {
-    private unleashUrl: string;
+    private readonly unleashUrl: string;
 
-    private linkStyle: LinkStyle;
+    private readonly linkStyle: LinkStyle;
 
-    constructor(unleashUrl: string, linkStyle: LinkStyle = LinkStyle.MD) {
+    private readonly formatStyle: FormatStyle;
+
+    constructor({
+        unleashUrl,
+        linkStyle = LinkStyle.MD,
+        formatStyle = 'simple',
+    }: IFeatureEventFormatterMdArgs) {
         this.unleashUrl = unleashUrl;
         this.linkStyle = linkStyle;
+        this.formatStyle = formatStyle;
     }
 
-    generateArchivedText(event: IEvent): string {
-        const { createdBy, type } = event;
-        const action = type === FEATURE_ARCHIVED ? 'archived' : 'revived';
-        const feature = this.generateFeatureLink(event);
-        return ` ${createdBy} just ${action} feature toggle *${feature}*`;
+    /**
+     * Returns the bold marker based on formatStyle, or wraps text with bold markers.
+     * @param text Optional text to wrap with bold markers.
+     * @returns Bold marker or bolded text.
+     */
+    bold(text?: string): string {
+        const boldChar = this.formatStyle === 'simple' ? '*' : '**';
+        return text ? `${boldChar}${text}${boldChar}` : boldChar;
     }
 
-    generateFeatureLink(event: IEvent): string {
-        if (this.linkStyle === LinkStyle.SLACK) {
-            return `<${this.featureLink(event)}|${event.featureName}>`;
-        } else {
-            return `[${event.featureName}](${this.featureLink(event)})`;
+    generateChangeRequestLink(event: IEvent): string | undefined {
+        const { preData, data, project, environment } = event;
+        const changeRequestId =
+            data?.changeRequestId || preData?.changeRequestId;
+        if (project && changeRequestId) {
+            const url = `${this.unleashUrl}/projects/${project}/change-requests/${changeRequestId}`;
+            const text = `#${changeRequestId}`;
+            const featureLink = this.generateFeatureLink(event);
+            const featureText = featureLink
+                ? ` for feature flag ${this.bold(featureLink)}`
+                : '';
+            const environmentText = environment
+                ? ` in the ${this.bold(environment)} environment`
+                : '';
+            const projectLink = this.generateProjectLink(event);
+            const projectText = project
+                ? ` in project ${this.bold(projectLink)}`
+                : '';
+            if (this.linkStyle === LinkStyle.SLACK) {
+                return `${this.bold(`<${url}|${text}>`)}${featureText}${environmentText}${projectText}`;
+            } else {
+                return `${this.bold(`[${text}](${url})`)}${featureText}${environmentText}${projectText}`;
+            }
         }
     }
 
-    generateStaleText(event: IEvent): string {
-        const { createdBy, type } = event;
-        const isStale = type === FEATURE_STALE_ON;
-        const feature = this.generateFeatureLink(event);
-
-        if (isStale) {
-            return `${createdBy} marked ${feature}  as stale and this feature toggle is now *ready to be removed* from the code.`;
-        }
-        return `${createdBy} removed the stale marking on *${feature}*.`;
-    }
-
-    generateEnvironmentToggleText(event: IEvent): string {
-        const { createdBy, environment, type, project } = event;
-        const toggleStatus =
-            type === FEATURE_ENVIRONMENT_ENABLED ? 'enabled' : 'disabled';
-        const feature = this.generateFeatureLink(event);
-        return `${createdBy} *${toggleStatus}* ${feature} in *${environment}* environment in project *${project}*`;
-    }
-
-    generateStrategyChangeText(event: IEvent): string {
-        const { createdBy, environment, project, data, preData, type } = event;
-        const feature = this.generateFeatureLink(event);
-        let strategyText: string = '';
-        if (FEATURE_STRATEGY_UPDATE === type) {
-            strategyText = `by updating strategy ${data?.name} in *${environment}*`;
-        } else if (FEATURE_STRATEGY_ADD === type) {
-            strategyText = `by adding strategy ${data?.name} in *${environment}*`;
-        } else if (FEATURE_STRATEGY_REMOVE === type) {
-            strategyText = `by removing strategy ${preData?.name} in *${environment}*`;
-        }
-        return `${createdBy} updated *${feature}* in project *${project}* ${strategyText}`;
-    }
-
-    generateMetadataText(event: IEvent): string {
-        const { createdBy, project } = event;
-        const feature = this.generateFeatureLink(event);
-        return `${createdBy} updated the metadata for ${feature} in project *${project}*`;
-    }
-
-    generateProjectChangeText(event: IEvent): string {
-        const { createdBy, project, featureName } = event;
-        return `${createdBy} moved ${featureName} to ${project}`;
-    }
-
-    featureLink(event: IEvent): string {
+    featureLink(event: IEvent): string | undefined {
         const { type, project = '', featureName } = event;
         if (type === FEATURE_ARCHIVED) {
+            if (project) {
+                return `${this.unleashUrl}/projects/${project}/archive`;
+            }
             return `${this.unleashUrl}/archive`;
         }
-        return `${this.unleashUrl}/projects/${project}/${featureName}`;
-    }
 
-    getAction(type: string): string {
-        switch (type) {
-            case FEATURE_CREATED:
-                return 'created';
-            case FEATURE_UPDATED:
-                return 'updated';
-            case FEATURE_VARIANTS_UPDATED:
-                return 'updated variants for';
-            default:
-                return type;
+        if (featureName) {
+            return `${this.unleashUrl}/projects/${project}/features/${featureName}`;
         }
     }
 
-    defaultText(event: IEvent): string {
-        const { createdBy, project, type } = event;
-        const action = this.getAction(type);
-        const feature = this.generateFeatureLink(event);
-        return `${createdBy} ${action} feature toggle ${feature} in project *${project}*`;
+    generateFeatureLink(event: IEvent): string | undefined {
+        if (event.featureName) {
+            if (this.linkStyle === LinkStyle.SLACK) {
+                return `<${this.featureLink(event)}|${event.featureName}>`;
+            } else {
+                return `[${event.featureName}](${this.featureLink(event)})`;
+            }
+        }
     }
 
-    format(event: IEvent): string {
-        switch (event.type) {
-            case FEATURE_ARCHIVED:
-            case FEATURE_REVIVED:
-                return this.generateArchivedText(event);
-            case FEATURE_STALE_ON:
-            case FEATURE_STALE_OFF:
-                return this.generateStaleText(event);
-            case FEATURE_ENVIRONMENT_DISABLED:
-            case FEATURE_ENVIRONMENT_ENABLED:
-                return this.generateEnvironmentToggleText(event);
-            case FEATURE_STRATEGY_ADD:
-            case FEATURE_STRATEGY_REMOVE:
-            case FEATURE_STRATEGY_UPDATE:
-                return this.generateStrategyChangeText(event);
-            case FEATURE_METADATA_UPDATED:
-                return this.generateMetadataText(event);
-            case FEATURE_PROJECT_CHANGE:
-                return this.generateProjectChangeText(event);
-            default:
-                return this.defaultText(event);
+    generateProjectLink(event: IEvent): string | undefined {
+        if (event.project) {
+            if (this.linkStyle === LinkStyle.SLACK) {
+                return `<${this.unleashUrl}/projects/${event.project}|${event.project}>`;
+            } else {
+                return `[${event.project}](${this.unleashUrl}/projects/${event.project})`;
+            }
         }
+    }
+
+    getStrategyTitle(event: IEvent): string | undefined {
+        return (
+            event.preData?.title ||
+            event.data?.title ||
+            event.preData?.name ||
+            event.data?.name
+        );
+    }
+
+    generateFeatureStrategyChangeText(event: IEvent): string | undefined {
+        const { environment, data, preData, type } = event;
+        if (type === FEATURE_STRATEGY_UPDATE && (data || preData)) {
+            const strategyText = () => {
+                switch ((data || preData).name) {
+                    case 'flexibleRollout':
+                        return this.flexibleRolloutStrategyChangeText(event);
+                    case 'default':
+                        return this.defaultStrategyChangeText(event);
+                    case 'userWithId':
+                        return this.userWithIdStrategyChangeText(event);
+                    case 'remoteAddress':
+                        return this.remoteAddressStrategyChangeText(event);
+                    case 'applicationHostname':
+                        return this.applicationHostnameStrategyChangeText(
+                            event,
+                        );
+                    default:
+                        return `by updating strategy ${this.bold(
+                            this.getStrategyTitle(event),
+                        )} in ${this.bold(environment)}`;
+                }
+            };
+
+            return strategyText();
+        }
+    }
+
+    private applicationHostnameStrategyChangeText(event: IEvent) {
+        return this.listOfValuesStrategyChangeText(event, 'hostNames');
+    }
+
+    private remoteAddressStrategyChangeText(event: IEvent) {
+        return this.listOfValuesStrategyChangeText(event, 'IPs');
+    }
+
+    private userWithIdStrategyChangeText(event: IEvent) {
+        return this.listOfValuesStrategyChangeText(event, 'userIds');
+    }
+
+    private listOfValuesStrategyChangeText(
+        event: IEvent,
+        propertyName: string,
+    ) {
+        const { preData, data, environment } = event;
+        const userIdText = (values) =>
+            values.length === 0
+                ? `empty set of ${propertyName}`
+                : `[${values}]`;
+        const usersText =
+            preData?.parameters[propertyName] === data?.parameters[propertyName]
+                ? ''
+                : !preData
+                  ? ` ${propertyName} to ${userIdText(
+                        data?.parameters[propertyName],
+                    )}`
+                  : ` ${propertyName} from ${userIdText(
+                        preData.parameters[propertyName],
+                    )} to ${userIdText(data?.parameters[propertyName])}`;
+        const constraintText = this.constraintChangeText(
+            preData?.constraints,
+            data?.constraints,
+        );
+        const segmentsText = this.segmentsChangeText(
+            preData?.segments,
+            data?.segments,
+        );
+        const strategySpecificText = [usersText, constraintText, segmentsText]
+            .filter((x) => x.length)
+            .join(';');
+        return `by updating strategy ${this.bold(
+            this.getStrategyTitle(event),
+        )} in ${this.bold(environment)}${strategySpecificText}`;
+    }
+
+    private flexibleRolloutStrategyChangeText(event: IEvent) {
+        const { preData, data, environment } = event;
+        const {
+            rollout: oldRollout,
+            stickiness: oldStickiness,
+            groupId: oldGroupId,
+        } = preData?.parameters || {};
+        const { rollout, stickiness, groupId } = data?.parameters || {};
+        const stickinessText =
+            oldStickiness === stickiness
+                ? ''
+                : !oldStickiness
+                  ? ` stickiness to ${stickiness}`
+                  : ` stickiness from ${oldStickiness} to ${stickiness}`;
+        const rolloutText =
+            oldRollout === rollout
+                ? ''
+                : !oldRollout
+                  ? ` rollout to ${rollout}%`
+                  : ` rollout from ${oldRollout}% to ${rollout}%`;
+        const groupIdText =
+            oldGroupId === groupId
+                ? ''
+                : !oldGroupId
+                  ? ` groupId to ${groupId}`
+                  : ` groupId from ${oldGroupId} to ${groupId}`;
+        const constraintText = this.constraintChangeText(
+            preData?.constraints,
+            data?.constraints,
+        );
+        const segmentsText = this.segmentsChangeText(
+            preData?.segments,
+            data?.segments,
+        );
+        const strategySpecificText = [
+            stickinessText,
+            rolloutText,
+            groupIdText,
+            constraintText,
+            segmentsText,
+        ]
+            .filter((txt) => txt.length)
+            .join(';');
+        return `by updating strategy ${this.bold(
+            this.getStrategyTitle(event),
+        )} in ${this.bold(environment)}${strategySpecificText}`;
+    }
+
+    private defaultStrategyChangeText(event: IEvent) {
+        const { preData, data, environment } = event;
+        const constraintText = this.constraintChangeText(
+            preData?.constraints,
+            data?.constraints,
+        );
+        const segmentsText = this.segmentsChangeText(
+            preData?.segments,
+            data?.segments,
+        );
+        const strategySpecificText = [constraintText, segmentsText]
+            .filter((txt) => txt.length)
+            .join(';');
+        return `by updating strategy ${this.bold(
+            this.getStrategyTitle(event),
+        )} in ${this.bold(environment)}${strategySpecificText}`;
+    }
+
+    private constraintChangeText(
+        oldConstraints: IConstraint[] = [],
+        newConstraints: IConstraint[] = [],
+    ) {
+        const formatConstraints = (constraints: IConstraint[]) => {
+            const constraintOperatorDescriptions = {
+                IN: 'is one of',
+                NOT_IN: 'is not one of',
+                STR_CONTAINS: 'is a string that contains',
+                STR_STARTS_WITH: 'is a string that starts with',
+                STR_ENDS_WITH: 'is a string that ends with',
+                NUM_EQ: 'is a number equal to',
+                NUM_GT: 'is a number greater than',
+                NUM_GTE: 'is a number greater than or equal to',
+                NUM_LT: 'is a number less than',
+                NUM_LTE: 'is a number less than or equal to',
+                DATE_BEFORE: 'is a date before',
+                DATE_AFTER: 'is a date after',
+                SEMVER_EQ: 'is a SemVer equal to',
+                SEMVER_GT: 'is a SemVer greater than',
+                SEMVER_LT: 'is a SemVer less than',
+            };
+            const formatConstraint = (constraint: IConstraint) => {
+                const val = constraint.hasOwnProperty('value')
+                    ? constraint.value
+                    : `(${constraint.values?.join(',')})`;
+                const operator = constraintOperatorDescriptions.hasOwnProperty(
+                    constraint.operator,
+                )
+                    ? constraintOperatorDescriptions[constraint.operator]
+                    : constraint.operator;
+
+                return `${constraint.contextName} ${
+                    constraint.inverted ? 'not ' : ''
+                }${operator} ${val}`;
+            };
+
+            return constraints.length === 0
+                ? 'empty set of constraints'
+                : `[${constraints.map(formatConstraint).join(', ')}]`;
+        };
+        const oldConstraintText = formatConstraints(oldConstraints);
+        const newConstraintText = formatConstraints(newConstraints);
+        return oldConstraintText === newConstraintText
+            ? ''
+            : ` constraints from ${oldConstraintText} to ${newConstraintText}`;
+    }
+
+    private segmentsChangeText(
+        oldSegments: string[] = [],
+        newSegments: string[] = [],
+    ) {
+        const formatSegments = (segments: string[]) => {
+            return segments.length === 0
+                ? 'empty set of segments'
+                : `(${segments.join(',')})`;
+        };
+        const oldSegmentsText = formatSegments(oldSegments);
+        const newSegmentsText = formatSegments(newSegments);
+
+        return oldSegmentsText === newSegmentsText
+            ? ''
+            : ` segments from ${oldSegmentsText} to ${newSegmentsText}`;
+    }
+
+    format(event: IEvent): IFormattedEventData {
+        const { createdBy, type } = event;
+        const { label, action, path } = EVENT_MAP[type] || {
+            label: type,
+            action: `${this.bold(createdBy)} triggered ${this.bold(type)}`,
+        };
+
+        const formatting = {
+            b: this.bold(),
+        };
+
+        const context = {
+            user: createdBy,
+            event,
+            strategyTitle: this.getStrategyTitle(event),
+            strategyChangeText: this.generateFeatureStrategyChangeText(event),
+            changeRequest: this.generateChangeRequestLink(event),
+            feature: this.generateFeatureLink(event),
+            project: this.generateProjectLink(event),
+            ...formatting,
+        };
+
+        Mustache.escape = (text) => text;
+
+        const text = Mustache.render(action, context);
+        const url = path
+            ? `${this.unleashUrl}${Mustache.render(path, context)}`
+            : undefined;
+
+        return {
+            label,
+            text,
+            url,
+        };
     }
 }

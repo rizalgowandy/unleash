@@ -1,10 +1,9 @@
-import fetch from 'node-fetch';
-import { IUnleashStores } from '../types/stores';
-import { IUnleashConfig } from '../types/option';
+import fetch from 'make-fetch-happen';
+import type { IUnleashStores } from '../types/stores';
+import type { IUnleashConfig } from '../types/option';
 import version from '../util/version';
-import { Logger } from '../logger';
-import { ISettingStore } from '../types/stores/settings-store';
-import { hoursToMilliseconds } from 'date-fns';
+import type { Logger } from '../logger';
+import type { ISettingStore } from '../types/stores/settings-store';
 
 export interface IVersionInfo {
     oss: string;
@@ -13,7 +12,7 @@ export interface IVersionInfo {
 
 export interface IVersionHolder {
     current: IVersionInfo;
-    latest: IVersionInfo | {};
+    latest: Partial<IVersionInfo>;
     isLatest: boolean;
     instanceId: string;
 }
@@ -21,6 +20,35 @@ export interface IVersionHolder {
 export interface IVersionResponse {
     versions: IVersionInfo;
     latest: boolean;
+}
+
+export interface IFeatureUsageInfo {
+    instanceId: string;
+    versionOSS: string;
+    versionEnterprise?: string;
+    users: number;
+    featureToggles: number;
+    projects: number;
+    contextFields: number;
+    roles: number;
+    customRootRoles: number;
+    featureExports: number;
+    featureImports: number;
+    groups: number;
+    environments: number;
+    segments: number;
+    strategies: number;
+    SAMLenabled: boolean;
+    OIDCenabled: boolean;
+    customStrategies: number;
+    customStrategiesInUse: number;
+    activeUsers30: number;
+    activeUsers60: number;
+    activeUsers90: number;
+    productionChanges30: number;
+    productionChanges60: number;
+    productionChanges90: number;
+    postgresVersion: string;
 }
 
 export default class VersionService {
@@ -34,7 +62,9 @@ export default class VersionService {
 
     private enabled: boolean;
 
-    private versionCheckUrl: string;
+    private telemetryEnabled: boolean;
+
+    private versionCheckUrl?: string;
 
     private instanceId?: string;
 
@@ -48,9 +78,10 @@ export default class VersionService {
             getLogger,
             versionCheck,
             enterpriseVersion,
+            telemetry,
         }: Pick<
             IUnleashConfig,
-            'getLogger' | 'versionCheck' | 'enterpriseVersion'
+            'getLogger' | 'versionCheck' | 'enterpriseVersion' | 'telemetry'
         >,
     ) {
         this.logger = getLogger('lib/services/version-service.js');
@@ -59,73 +90,80 @@ export default class VersionService {
             oss: version,
             enterprise: enterpriseVersion || '',
         };
-        this.enabled = versionCheck.enable;
+        this.enabled = versionCheck.enable || false;
+        this.telemetryEnabled = telemetry;
         this.versionCheckUrl = versionCheck.url;
         this.isLatest = true;
-        process.nextTick(() => this.setup());
     }
 
-    async setup(): Promise<void> {
-        await this.setInstanceId();
-        await this.checkLatestVersion();
-        this.timer = setInterval(
-            async () => this.checkLatestVersion(),
-            hoursToMilliseconds(48),
-        );
-        this.timer.unref();
-    }
-
-    async setInstanceId(): Promise<void> {
+    private async readInstanceId(): Promise<string | undefined> {
         try {
-            const { id } = await this.settingStore.get('instanceInfo');
-            this.instanceId = id;
+            const { id } = (await this.settingStore.get<{ id: string }>(
+                'instanceInfo',
+            )) ?? { id: undefined };
+            return id;
         } catch (err) {
-            this.logger.warn('Could not find instanceInfo');
+            this.logger.warn('Could not find instanceInfo', err);
         }
     }
 
-    async checkLatestVersion(): Promise<void> {
+    async getInstanceId() {
+        if (!this.instanceId) {
+            this.instanceId = await this.readInstanceId();
+        }
+        return this.instanceId;
+    }
+
+    async checkLatestVersion(
+        telemetryDataProvider: () => Promise<IFeatureUsageInfo>,
+    ): Promise<void> {
+        const instanceId = await this.getInstanceId();
+        this.logger.debug(
+            `Checking for newest version for instanceId=${instanceId}`,
+        );
         if (this.enabled) {
             try {
-                const res = await fetch(this.versionCheckUrl, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        versions: this.current,
-                        instanceId: this.instanceId,
-                    }),
-                    headers: { 'Content-Type': 'application/json' },
-                });
-                if (res.ok) {
-                    const data = (await res.json()) as IVersionResponse;
-                    this.latest = {
-                        oss: data.versions.oss,
-                        enterprise: data.versions.enterprise,
-                    };
-                    this.isLatest = data.latest;
+                const versionPayload: any = {
+                    versions: this.current,
+                    instanceId: instanceId,
+                };
+
+                if (this.telemetryEnabled) {
+                    versionPayload.featureInfo = await telemetryDataProvider();
+                }
+                if (this.versionCheckUrl) {
+                    const res = await fetch(this.versionCheckUrl, {
+                        method: 'POST',
+                        body: JSON.stringify(versionPayload),
+                        headers: { 'Content-Type': 'application/json' },
+                    });
+                    if (res.ok) {
+                        const data = (await res.json()) as IVersionResponse;
+                        this.latest = {
+                            oss: data.versions.oss,
+                            enterprise: data.versions.enterprise,
+                        };
+                        this.isLatest = data.latest;
+                    } else {
+                        this.logger.info(
+                            `Could not check newest version. Status: ${res.status}`,
+                        );
+                    }
                 } else {
-                    this.logger.info(
-                        `Could not check newest version. Status: ${res.status}`,
-                    );
+                    this.logger.info('Had no URL to check newest version');
                 }
             } catch (err) {
                 this.logger.info('Could not check newest version', err);
             }
         }
     }
-
-    getVersionInfo(): IVersionHolder {
+    async getVersionInfo(): Promise<IVersionHolder> {
+        const instanceId = await this.getInstanceId();
         return {
             current: this.current,
             latest: this.latest || {},
             isLatest: this.isLatest,
-            instanceId: this.instanceId,
+            instanceId: instanceId || 'unresolved-instance-id',
         };
     }
-
-    destroy(): void {
-        clearInterval(this.timer);
-        this.timer = null;
-    }
 }
-
-module.exports = VersionService;

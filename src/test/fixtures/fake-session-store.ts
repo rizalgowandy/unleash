@@ -1,4 +1,7 @@
-import { ISession, ISessionStore } from '../../lib/types/stores/session-store';
+import type {
+    ISession,
+    ISessionStore,
+} from '../../lib/types/stores/session-store';
 
 export default class FakeSessionStore implements ISessionStore {
     private sessions: ISession[] = [];
@@ -48,5 +51,13 @@ export default class FakeSessionStore implements ISessionStore {
         const session = { ...data, createdAt: new Date() };
         this.sessions.push(session);
         return session;
+    }
+
+    async getSessionsCount(): Promise<{ userId: number; count: number }[]> {
+        return [];
+    }
+
+    async getMaxSessionsCount(): Promise<number> {
+        return 0;
     }
 }

@@ -1,16 +1,15 @@
-export default class IncompatibleProjectError extends Error {
-    constructor(targetProject: string) {
-        super();
-        Error.captureStackTrace(this, this.constructor);
+import { type ApiErrorSchema, UnleashError } from './unleash-error';
 
-        this.name = this.constructor.name;
-        this.message = `${targetProject} is not a compatible target`;
+export default class IncompatibleProjectError extends UnleashError {
+    statusCode = 403;
+
+    constructor(targetProject: string) {
+        super(`${targetProject} is not a compatible target`);
     }
 
-    toJSON(): any {
-        const obj = {
-            isJoi: true,
-            name: this.constructor.name,
+    toJSON(): ApiErrorSchema {
+        return {
+            ...super.toJSON(),
             details: [
                 {
                     validationErrors: [],
@@ -18,6 +17,5 @@ export default class IncompatibleProjectError extends Error {
                 },
             ],
         };
-        return obj;
     }
 }

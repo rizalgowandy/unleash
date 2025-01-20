@@ -1,9 +1,10 @@
-import { IUnleashTest, setupAppWithAuth } from '../../helpers/test-helper';
-import dbInit, { ITestDb } from '../../helpers/database-init';
+import { type IUnleashTest, setupAppWithAuth } from '../../helpers/test-helper';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
 import getLogger from '../../../fixtures/no-logger';
-import { ApiTokenService } from '../../../../lib/services/api-token-service';
+import type { ApiTokenService } from '../../../../lib/services/api-token-service';
 import { ApiTokenType } from '../../../../lib/types/models/api-token';
 import { DEFAULT_ENV } from '../../../../lib/util/constants';
+import { TEST_AUDIT_USER } from '../../../../lib/types';
 
 let app: IUnleashTest;
 let db: ITestDb;
@@ -13,14 +14,15 @@ let apiTokenService: ApiTokenService;
 const environment = 'testing';
 const project = 'default';
 const project2 = 'some';
-const username = 'test';
+const tokenName = 'test';
+const tokenUserId = -9999;
 const feature1 = 'f1.token.access';
 const feature2 = 'f2.token.access';
 const feature3 = 'f3.p2.token.access';
 
 beforeAll(async () => {
     db = await dbInit('feature_api_api_access_client', getLogger);
-    app = await setupAppWithAuth(db.stores);
+    app = await setupAppWithAuth(db.stores, {}, db.rawDatabase);
     apiTokenService = app.services.apiTokenService;
 
     const { featureToggleServiceV2, environmentService } = app.services;
@@ -35,10 +37,19 @@ beforeAll(async () => {
         id: project2,
         name: 'Test Project 2',
         description: '',
+        mode: 'open' as const,
     });
 
-    await environmentService.addEnvironmentToProject(environment, project);
-    await environmentService.addEnvironmentToProject(environment, project2);
+    await environmentService.addEnvironmentToProject(
+        environment,
+        project,
+        TEST_AUDIT_USER,
+    );
+    await environmentService.addEnvironmentToProject(
+        environment,
+        project2,
+        TEST_AUDIT_USER,
+    );
 
     await featureToggleServiceV2.createFeatureToggle(
         project,
@@ -46,7 +57,7 @@ beforeAll(async () => {
             name: feature1,
             description: 'the #1 feature',
         },
-        username,
+        TEST_AUDIT_USER,
     );
 
     await featureToggleServiceV2.createStrategy(
@@ -56,16 +67,16 @@ beforeAll(async () => {
             parameters: {},
         },
         { projectId: project, featureName: feature1, environment: DEFAULT_ENV },
-        username,
+        TEST_AUDIT_USER,
     );
     await featureToggleServiceV2.createStrategy(
         {
-            name: 'custom-testing',
+            name: 'flexibleRollout',
             constraints: [],
             parameters: {},
         },
         { projectId: project, featureName: feature1, environment },
-        username,
+        TEST_AUDIT_USER,
     );
 
     // create feature 2
@@ -74,7 +85,7 @@ beforeAll(async () => {
         {
             name: feature2,
         },
-        username,
+        TEST_AUDIT_USER,
     );
     await featureToggleServiceV2.createStrategy(
         {
@@ -83,7 +94,7 @@ beforeAll(async () => {
             parameters: {},
         },
         { projectId: project, featureName: feature2, environment },
-        username,
+        TEST_AUDIT_USER,
     );
 
     // create feature 3
@@ -92,7 +103,7 @@ beforeAll(async () => {
         {
             name: feature3,
         },
-        username,
+        TEST_AUDIT_USER,
     );
     await featureToggleServiceV2.createStrategy(
         {
@@ -101,7 +112,7 @@ beforeAll(async () => {
             parameters: {},
         },
         { projectId: project2, featureName: feature3, environment },
-        username,
+        TEST_AUDIT_USER,
     );
 });
 
@@ -110,10 +121,10 @@ afterAll(async () => {
     await db.destroy();
 });
 
-test('returns feature toggle with "default" config', async () => {
+test('returns feature flag with "default" config', async () => {
     const token = await apiTokenService.createApiToken({
         type: ApiTokenType.CLIENT,
-        username,
+        tokenName,
         environment: DEFAULT_ENV,
         project,
     });
@@ -132,10 +143,10 @@ test('returns feature toggle with "default" config', async () => {
         });
 });
 
-test('returns feature toggle with testing environment config', async () => {
+test('returns feature flag with testing environment config', async () => {
     const token = await apiTokenService.createApiToken({
         type: ApiTokenType.CLIENT,
-        username,
+        tokenName: tokenName,
         environment,
         project,
     });
@@ -151,17 +162,17 @@ test('returns feature toggle with testing environment config', async () => {
 
             expect(features).toHaveLength(2);
             expect(f1.strategies).toHaveLength(1);
-            expect(f1.strategies[0].name).toBe('custom-testing');
+            expect(f1.strategies[0].name).toBe('flexibleRollout');
             expect(f2.strategies).toHaveLength(1);
             expect(query.project[0]).toBe(project);
             expect(query.environment).toBe(environment);
         });
 });
 
-test('returns feature toggle for project2', async () => {
+test('returns feature flag for project2', async () => {
     const token = await apiTokenService.createApiToken({
         type: ApiTokenType.CLIENT,
-        username,
+        tokenName: tokenName,
         environment,
         project: project2,
     });
@@ -178,10 +189,10 @@ test('returns feature toggle for project2', async () => {
         });
 });
 
-test('returns feature toggle for all projects', async () => {
+test('returns feature flag for all projects', async () => {
     const token = await apiTokenService.createApiToken({
         type: ApiTokenType.CLIENT,
-        username,
+        tokenName: tokenName,
         environment,
         project: '*',
     });

@@ -1,15 +1,24 @@
-import dbInit from '../../helpers/database-init';
-import { setupApp } from '../../helpers/test-helper';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
+import {
+    type IUnleashTest,
+    setupAppWithCustomConfig,
+} from '../../helpers/test-helper';
 import getLogger from '../../../fixtures/no-logger';
 
 const MASKED_VALUE = '*****';
 
-let app;
-let db;
+let app: IUnleashTest;
+let db: ITestDb;
 
 beforeAll(async () => {
     db = await dbInit('addon_api_serial', getLogger);
-    app = await setupApp(db.stores);
+    app = await setupAppWithCustomConfig(db.stores, {
+        experimental: {
+            flags: {
+                strictSchemaValidation: true,
+            },
+        },
+    });
 });
 
 afterAll(async () => {
@@ -18,15 +27,13 @@ afterAll(async () => {
 });
 
 test('gets all addons', async () => {
-    expect.assertions(3);
-
-    return app.request
+    await app.request
         .get('/api/admin/addons')
         .expect('Content-Type', /json/)
         .expect(200)
         .expect((res) => {
             expect(res.body.addons.length).toBe(0);
-            expect(res.body.providers.length).toBe(4);
+            expect(res.body.providers.length).toBe(6);
             expect(res.body.providers[0].name).toBe('webhook');
         });
 });
@@ -98,11 +105,11 @@ test('should update addon configuration', async () => {
     const { id } = res.body;
 
     const updatedConfig = {
+        ...config,
         parameters: {
             url: 'http://example.com',
             bodyTemplate: "{'name': '{{event.data.name}}' }",
         },
-        ...config,
     };
 
     await app.request
@@ -195,4 +202,99 @@ test('should not delete unknown addon configuration', async () => {
     expect.assertions(0);
 
     return app.request.delete('/api/admin/addons/21231').expect(404);
+});
+
+test("should return 400 if it doesn't recognize the provider", async () => {
+    const payload = {
+        provider: 'htni',
+        enabled: true,
+        parameters: {},
+        events: [],
+    };
+
+    return app.request.post('/api/admin/addons').send(payload).expect(400);
+});
+
+test('updating an addon returns the new addon configuration', async () => {
+    const config = {
+        provider: 'webhook',
+        enabled: true,
+        parameters: {
+            url: 'http://localhost:4242/webhook',
+        },
+        events: [],
+    };
+    const { body } = await app.request.post('/api/admin/addons').send(config);
+
+    const updatedConfig = {
+        ...config,
+        enabled: false,
+        parameters: { url: 'http://new-url:4343' },
+    };
+
+    return app.request
+        .put(`/api/admin/addons/${body.id}`)
+        .send(updatedConfig)
+        .expect((res) => {
+            expect(res.body).toMatchObject(updatedConfig);
+        });
+});
+
+describe('missing descriptions', () => {
+    const addonWithoutDescription = {
+        provider: 'webhook',
+        enabled: true,
+        parameters: {
+            url: 'http://localhost:4242/webhook',
+        },
+        events: ['feature-created', 'feature-updated'],
+    };
+
+    it('creating an addon without a description, sets the description to `null`', async () => {
+        const { body } = await app.request
+            .post('/api/admin/addons')
+            .send(addonWithoutDescription)
+            .expect((res) => {
+                expect(res.body.description).toBeNull();
+            });
+
+        return app.request
+            .get(`/api/admin/addons/${body.id}`)
+            .expect((getResponse) => {
+                expect(getResponse.body.description).toBeNull();
+            });
+    });
+
+    it('updating an addon without touching `description` keeps the original value', async () => {
+        const { body } = await app.request
+            .post('/api/admin/addons')
+            .send(addonWithoutDescription);
+
+        const newUrl = 'http://localhost:4242/newUrl';
+        return app.request
+            .put(`/api/admin/addons/${body.id}`)
+            .send({ ...addonWithoutDescription, parameters: { url: newUrl } })
+            .expect((res) => {
+                expect(res.body.description).toBeNull();
+            });
+    });
+
+    test.each(['', null])(
+        'sending a description value of "%s", sets a `null` sets the description to an empty string',
+        async (description) => {
+            const { body } = await app.request
+                .post('/api/admin/addons')
+                .send(addonWithoutDescription);
+
+            return app.request
+                .put(`/api/admin/addons/${body.id}`)
+                .send({
+                    ...addonWithoutDescription,
+                    description,
+                })
+                .expect((res) => {
+                    expect(res.body.description).toStrictEqual('');
+                });
+        },
+    );
 });

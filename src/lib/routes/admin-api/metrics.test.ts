@@ -1,9 +1,11 @@
-import supertest from 'supertest';
+import supertest, { type Test } from 'supertest';
 import createStores from '../../../test/fixtures/store';
 import permissions from '../../../test/fixtures/permissions';
 import getApp from '../../app';
 import { createTestConfig } from '../../../test/config/test-config';
 import { createServices } from '../../services';
+import type { IUnleashStores } from '../../types';
+import type TestAgent from 'supertest/lib/agent';
 
 async function getSetup() {
     const stores = createStores();
@@ -18,27 +20,17 @@ async function getSetup() {
         request: supertest(app),
         stores,
         perms,
-        destroy: () => {
-            services.versionService.destroy();
-            services.clientInstanceService.destroy();
-            services.apiTokenService.destroy();
-        },
+        config,
     };
 }
 
-let stores;
-let request;
-let destroy;
+let stores: IUnleashStores;
+let request: TestAgent<Test>;
 
 beforeEach(async () => {
     const setup = await getSetup();
     stores = setup.stores;
     request = setup.request;
-    destroy = setup.destroy;
-});
-
-afterEach(() => {
-    destroy();
 });
 
 test('/api/admin/metrics/seen-toggles is deprecated', () => {
@@ -84,7 +76,21 @@ test('should store application', () => {
         .expect(202);
 });
 
-test('should store application details wihtout strategies', () => {
+test('should store application coming from edit application form', () => {
+    expect.assertions(0);
+    const appName = '123!23';
+
+    return request
+        .post(`/api/admin/metrics/applications/${appName}`)
+        .send({
+            url: 'http://test.com',
+            description: 'This is an optional description',
+            icon: 'arrow-down',
+        })
+        .expect(202);
+});
+
+test('should store application details without strategies', () => {
     expect.assertions(0);
     const appName = '123!23';
 

@@ -1,31 +1,37 @@
 import merge from 'deepmerge';
 import {
     IAuthType,
-    IUnleashConfig,
-    IUnleashOptions,
+    type IUnleashConfig,
+    type IUnleashOptions,
 } from '../../lib/types/option';
 import getLogger from '../fixtures/no-logger';
-
 import { createConfig } from '../../lib/create-config';
-import { experimentalSegmentsConfig } from '../../lib/experimental';
+import path from 'path';
 
 function mergeAll<T>(objects: Partial<T>[]): T {
     return merge.all<T>(objects.filter((i) => i));
 }
 
 export function createTestConfig(config?: IUnleashOptions): IUnleashConfig {
+    getLogger.setMuteError(true);
     const testConfig: IUnleashOptions = {
         getLogger,
         authentication: { type: IAuthType.NONE, createAdminUser: false },
         server: { secret: 'really-secret' },
-        session: {
-            db: false,
+        session: { db: false },
+        versionCheck: { enable: false },
+        disableScheduler: true,
+        clientFeatureCaching: {
+            enabled: false,
         },
         experimental: {
-            segments: experimentalSegmentsConfig(),
+            flags: {
+                embedProxy: true,
+                embedProxyFrontend: true,
+            },
         },
-        versionCheck: { enable: false },
+        publicFolder: path.join(__dirname, '../examples'),
     };
-    const options = mergeAll<IUnleashOptions>([testConfig, config]);
+    const options = mergeAll<IUnleashOptions>([testConfig, config || {}]);
     return createConfig(options);
 }

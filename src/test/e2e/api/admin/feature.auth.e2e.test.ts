@@ -1,8 +1,8 @@
 import { setupAppWithAuth } from '../../helpers/test-helper';
-import dbInit from '../../helpers/database-init';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
 import getLogger from '../../../fixtures/no-logger';
 
-let db;
+let db: ITestDb;
 
 beforeAll(async () => {
     db = await dbInit('feature_api_auth', getLogger);
@@ -12,19 +12,23 @@ afterAll(async () => {
     await db.destroy();
 });
 
-test('creates new feature toggle with createdBy', async () => {
+test('creates new feature flag with createdBy', async () => {
     expect.assertions(1);
 
-    const { request, destroy } = await setupAppWithAuth(db.stores);
+    const { request, destroy } = await setupAppWithAuth(
+        db.stores,
+        {},
+        db.rawDatabase,
+    );
 
     // Login
     await request.post('/auth/demo/login').send({
         email: 'user@mail.com',
     });
 
-    // create toggle
+    // create flag
     await request
-        .post('/api/admin/features')
+        .post('/api/admin/projects/default/features')
         .send({
             name: 'com.test.Username',
             enabled: false,
@@ -42,6 +46,6 @@ test('creates new feature toggle with createdBy', async () => {
 test('should require authenticated user', async () => {
     expect.assertions(0);
     const { request, destroy } = await setupAppWithAuth(db.stores);
-    await request.get('/api/admin/features').expect(401);
+    await request.get('/api/admin/projects/default/features').expect(401);
     await destroy();
 });

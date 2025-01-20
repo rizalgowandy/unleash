@@ -1,9 +1,11 @@
-import {
+import type {
     IClientApplication,
+    IClientApplications,
+    IClientApplicationsSearchParams,
     IClientApplicationsStore,
 } from '../../lib/types/stores/client-applications-store';
 import NotFoundError from '../../lib/error/notfound-error';
-import { IApplicationQuery } from '../../lib/types/query';
+import type { IApplicationOverview } from '../../lib/features/metrics/instance/models';
 
 export default class FakeClientApplicationsStore
     implements IClientApplicationsStore
@@ -11,7 +13,7 @@ export default class FakeClientApplicationsStore
     apps: IClientApplication[] = [];
 
     async bulkUpsert(details: Partial<IClientApplication>[]): Promise<void> {
-        // @ts-ignore
+        // @ts-expect-error
         details.forEach((d) => this.apps.push(d));
     }
 
@@ -54,15 +56,13 @@ export default class FakeClientApplicationsStore
         return this.get(appName);
     }
 
-    async getAppsForStrategy(
-        query: IApplicationQuery,
-    ): Promise<IClientApplication[]> {
-        if (query.strategyName) {
-            return this.apps.filter((a) =>
-                a.strategies.includes(query.strategyName),
-            );
-        }
-        return this.apps;
+    async getApplications(
+        query: IClientApplicationsSearchParams,
+    ): Promise<IClientApplications> {
+        return {
+            applications: this.apps,
+            total: this.apps.length,
+        };
     }
 
     async getUnannounced(): Promise<IClientApplication[]> {
@@ -77,5 +77,9 @@ export default class FakeClientApplicationsStore
     async upsert(details: Partial<IClientApplication>): Promise<void> {
         await this.delete(details.appName);
         return this.bulkUpsert([details]);
+    }
+
+    getApplicationOverview(appName: string): Promise<IApplicationOverview> {
+        throw new Error('Method not implemented.');
     }
 }

@@ -1,30 +1,58 @@
-import EventEmitter from 'events';
-import { IEventStore } from '../../lib/types/stores/event-store';
-import { IEvent } from '../../lib/types/events';
+import type { IEventStore } from '../../lib/types/stores/event-store';
+import type { IBaseEvent, IEvent } from '../../lib/types/events';
+import { sharedEventEmitter } from '../../lib/util/anyEventEmitter';
+import type { IQueryOperations } from '../../lib/features/events/event-store';
+import type {
+    DeprecatedSearchEventsSchema,
+    ProjectActivitySchema,
+} from '../../lib/openapi';
+import type EventEmitter from 'events';
 
-class FakeEventStore extends EventEmitter implements IEventStore {
+class FakeEventStore implements IEventStore {
     events: IEvent[];
 
+    private eventEmitter: EventEmitter = sharedEventEmitter;
+
     constructor() {
-        super();
-        this.setMaxListeners(0);
+        this.eventEmitter.setMaxListeners(0);
         this.events = [];
     }
-
-    async getEventsForFeature(featureName: string): Promise<IEvent[]> {
-        return this.events.filter((e) => e.featureName === featureName);
+    getRevisionRange(start: number, end: number): Promise<IEvent[]> {
+        throw new Error('Method not implemented.');
     }
 
-    store(event: IEvent): Promise<void> {
-        this.events.push(event);
-        this.emit(event.type, event);
+    getProjectRecentEventActivity(
+        project: string,
+    ): Promise<ProjectActivitySchema> {
+        throw new Error('Method not implemented.');
+    }
+
+    getEventCreators(): Promise<{ id: number; name: string }[]> {
+        throw new Error('Method not implemented.');
+    }
+
+    getMaxRevisionId(): Promise<number> {
+        return Promise.resolve(1);
+    }
+
+    store(event: IBaseEvent): Promise<void> {
+        this.events.push({
+            ...event,
+            id: this.events.length,
+            createdAt: new Date(),
+        });
+        this.eventEmitter.emit(event.type, event);
         return Promise.resolve();
     }
 
-    batchStore(events: IEvent[]): Promise<void> {
+    batchStore(events: IBaseEvent[]): Promise<void> {
         events.forEach((event) => {
-            this.events.push(event);
-            this.emit(event.type, event);
+            this.events.push({
+                ...event,
+                id: this.events.length,
+                createdAt: new Date(),
+            });
+            this.eventEmitter.emit(event.type, event);
         });
         return Promise.resolve();
     }
@@ -44,6 +72,21 @@ class FakeEventStore extends EventEmitter implements IEventStore {
         this.events = [];
     }
 
+    async count(): Promise<number> {
+        return Promise.resolve(this.events.length);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    searchEventsCount(): Promise<number> {
+        return Promise.resolve(0);
+    }
+
+    deprecatedFilteredCount(
+        search: DeprecatedSearchEventsSchema,
+    ): Promise<number> {
+        return Promise.resolve(0);
+    }
+
     destroy(): void {}
 
     async exists(key: number): Promise<boolean> {
@@ -51,19 +94,58 @@ class FakeEventStore extends EventEmitter implements IEventStore {
     }
 
     async get(key: number): Promise<IEvent> {
-        return this.events.find((e) => e.id === key);
+        return this.events.find((e) => e.id === key)!;
     }
 
     async getAll(): Promise<IEvent[]> {
         return this.events;
     }
 
-    async getEventsFilterByType(type: string): Promise<IEvent[]> {
-        return this.events.filter((e) => e.type === type);
+    async deprecatedSearchEvents(): Promise<IEvent[]> {
+        throw new Error('Method not implemented.');
+    }
+    async searchEvents(): Promise<IEvent[]> {
+        throw new Error('Method not implemented.');
     }
 
-    async getEventsFilterByProject(project: string): Promise<IEvent[]> {
-        return this.events.filter((e) => e.project === project);
+    async query(operations: IQueryOperations[]): Promise<IEvent[]> {
+        if (operations) return [];
+        return [];
+    }
+
+    async queryCount(operations: IQueryOperations[]): Promise<number> {
+        if (operations) return 0;
+        return 0;
+    }
+
+    setMaxListeners(number: number): EventEmitter {
+        return this.eventEmitter.setMaxListeners(number);
+    }
+
+    on(
+        eventName: string | symbol,
+        listener: (...args: any[]) => void,
+    ): EventEmitter {
+        return this.eventEmitter.on(eventName, listener);
+    }
+
+    emit(eventName: string | symbol, ...args: any[]): boolean {
+        return this.eventEmitter.emit(eventName, ...args);
+    }
+
+    off(
+        eventName: string | symbol,
+        listener: (...args: any[]) => void,
+    ): EventEmitter {
+        return this.eventEmitter.off(eventName, listener);
+    }
+
+    publishUnannouncedEvents(): Promise<void> {
+        throw new Error('Method not implemented.');
+    }
+
+    setCreatedByUserId(batchSize: number): Promise<number | undefined> {
+        throw new Error('Method not implemented.');
     }
 }
 

@@ -17,9 +17,9 @@ test('should calculate the correct time in seconds', () => {
 });
 
 test('timer should track the time', async () => {
-    jest.useFakeTimers('modern');
+    jest.useFakeTimers();
     const tt = timer.new();
-    let diff;
+    let diff: number | undefined;
     timeout(() => {
         diff = tt();
     }, 20);

@@ -1,7 +1,9 @@
 import joi from 'joi';
-import { Response } from 'express';
-import { Logger } from '../logger';
-import BaseError from '../error/base-error';
+import type { Response } from 'express';
+import type { Logger } from '../logger';
+import { UnleashError } from '../error/unleash-error';
+import { fromLegacyError } from '../error/from-legacy-error';
+import createError from 'http-errors';
 
 export const customJoi = joi.extend((j) => ({
     type: 'isUrlFriendly',
@@ -11,7 +13,11 @@ export const customJoi = joi.extend((j) => ({
     },
     validate(value, helpers) {
         // Base validation regardless of the rules applied
-        if (encodeURIComponent(value) !== value) {
+        if (
+            encodeURIComponent(value) !== value ||
+            value === '..' ||
+            value === '.'
+        ) {
             // Generate an error, state and options need to be passed
             return { value, errors: helpers.error('isUrlFriendly.base') };
         }
@@ -26,50 +32,34 @@ export const handleErrors: (
     logger: Logger,
     error: Error,
 ) => void = (res, logger, error) => {
-    logger.warn(error.message);
-    // @ts-ignore
-    // eslint-disable-next-line no-param-reassign
-    error.isJoi = true;
-
-    if (error instanceof BaseError) {
-        return res.status(error.statusCode).json(error).end();
+    if (createError.isHttpError(error)) {
+        return res
+            .status(
+                // @ts-expect-error - The error object here is not guaranteed to contain status
+                error.status ?? 400,
+            )
+            .json({ message: error.message });
     }
 
-    switch (error.name) {
-        case 'ValidationError':
-            return res.status(400).json(error).end();
-        case 'BadDataError':
-            return res.status(400).json(error).end();
-        case 'OwaspValidationError':
-            return res.status(400).json(error).end();
-        case 'PasswordUndefinedError':
-            return res.status(400).json(error).end();
-        case 'MinimumOneEnvironmentError':
-            return res.status(400).json(error).end();
-        case 'InvalidTokenError':
-            return res.status(401).json(error).end();
-        case 'NoAccessError':
-            return res.status(403).json(error).end();
-        case 'UsedTokenError':
-            return res.status(403).json(error).end();
-        case 'InvalidOperationError':
-            return res.status(403).json(error).end();
-        case 'IncompatibleProjectError':
-            return res.status(403).json(error).end();
-        case 'OperationDeniedError':
-            return res.status(403).json(error).end();
-        case 'NotFoundError':
-            return res.status(404).json(error).end();
-        case 'NameExistsError':
-            return res.status(409).json(error).end();
-        case 'FeatureHasTagError':
-            return res.status(409).json(error).end();
-        case 'RoleInUseError':
-            return res.status(400).json(error).end();
-        case 'ProjectWithoutOwnerError':
-            return res.status(409).json(error).end();
-        default:
-            logger.error('Server failed executing request', error);
-            return res.status(500).end();
+    const finalError =
+        error instanceof UnleashError ? error : fromLegacyError(error);
+
+    const format = (thing: object) => JSON.stringify(thing, null, 2);
+
+    if (!(error instanceof UnleashError)) {
+        logger.debug(
+            `I encountered an error that wasn't an instance of the \`UnleashError\` type. The original error was: ${format(
+                error,
+            )}. It was mapped to ${format(finalError.toJSON())}`,
+        );
     }
+
+    if (finalError.statusCode === 500) {
+        logger.error(
+            `Server failed executing request: ${format(error)}`,
+            error,
+        );
+    }
+
+    return res.status(finalError.statusCode).json(finalError).end();
 };

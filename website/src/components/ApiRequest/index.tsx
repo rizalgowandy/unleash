@@ -8,8 +8,9 @@
    be necessary to separate into multiple components based on request
    types, for instance.
 
-**/
+ **/
 
+// biome-ignore lint/style/useImportType: <explanation>
 import React from 'react';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -68,6 +69,9 @@ curl -H "Content-Type: application/json" \\
      <${baseUrl}>/${url}`
     ).trim();
 
+    const httpieBlockFormatSpecifier =
+        verbUpper === 'POST' && !prettyPayload ? '--json' : '';
+
     const httpieBlock = (
         payload
             ? `echo '${prettyPayload}' \\
@@ -77,23 +81,24 @@ curl -H "Content-Type: application/json" \\
             : `
 http ${verbUpper} \\
   <${baseUrl}>/${url} \\
-  Authorization:<${authToken}>`.trim()
+  Authorization:<${authToken}> \\
+  ${httpieBlockFormatSpecifier}`.trim()
     ).trim();
 
     return (
-        <Tabs groupId="api-request">
-            <TabItem value="http" label="HTTP">
-                <CodeBlock language="http" title={title}>
+        <Tabs groupId='api-request'>
+            <TabItem value='http' label='HTTP'>
+                <CodeBlock language='http' title={title}>
                     {httpBlock}
                 </CodeBlock>
             </TabItem>
-            <TabItem value="curl" label="cURL">
-                <CodeBlock language="bash" title={title}>
+            <TabItem value='curl' label='cURL'>
+                <CodeBlock language='bash' title={title}>
                     {curlBlock}
                 </CodeBlock>
             </TabItem>
-            <TabItem value="httpie" label="HTTPie">
-                <CodeBlock language="bash" title={title}>
+            <TabItem value='httpie' label='HTTPie'>
+                <CodeBlock language='bash' title={title}>
                     {httpieBlock}
                 </CodeBlock>
             </TabItem>

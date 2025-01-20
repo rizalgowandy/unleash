@@ -1,37 +1,48 @@
 import BadDataError from '../../error/bad-data-error';
-import { IEnvironment } from '../model';
+import type { IEnvironment } from '../model';
 
 export const ALL = '*';
 
 export enum ApiTokenType {
     CLIENT = 'client',
     ADMIN = 'admin',
+    FRONTEND = 'frontend',
 }
 
 export interface ILegacyApiTokenCreate {
     secret: string;
-    username: string;
+    /**
+     * @deprecated Use tokenName instead
+     */
+    username?: string;
     type: ApiTokenType;
-    environment: string;
+    environment?: string;
     project?: string;
     projects?: string[];
     expiresAt?: Date;
+    tokenName?: string;
 }
 
 export interface IApiTokenCreate {
     secret: string;
-    username: string;
+    tokenName: string;
+    alias?: string;
     type: ApiTokenType;
     environment: string;
     projects: string[];
     expiresAt?: Date;
+    /**
+     * @deprecated Use tokenName instead
+     */
+    username?: string;
 }
 
-export interface IApiToken extends IApiTokenCreate {
+export interface IApiToken extends Omit<IApiTokenCreate, 'alias'> {
     createdAt: Date;
     seenAt?: Date;
     environment: string;
     project: string;
+    alias?: string | null;
 }
 
 export const isAllProjects = (projects: string[]): boolean => {
@@ -42,7 +53,7 @@ export const mapLegacyProjects = (
     project?: string,
     projects?: string[],
 ): string[] => {
-    let cleanedProjects;
+    let cleanedProjects: string[];
     if (project) {
         cleanedProjects = [project];
     } else if (projects) {
@@ -63,9 +74,9 @@ export const mapLegacyToken = (
 ): Omit<IApiTokenCreate, 'secret'> => {
     const cleanedProjects = mapLegacyProjects(token.project, token.projects);
     return {
-        username: token.username,
+        tokenName: token.username ?? token.tokenName!,
         type: token.type,
-        environment: token.environment,
+        environment: token.environment || 'development',
         projects: cleanedProjects,
         expiresAt: token.expiresAt,
     };
@@ -102,6 +113,12 @@ export const validateApiToken = ({
             'Client token cannot be scoped to all environments',
         );
     }
+
+    if (type === ApiTokenType.FRONTEND && environment === ALL) {
+        throw new BadDataError(
+            'Frontend token cannot be scoped to all environments',
+        );
+    }
 };
 
 export const validateApiTokenEnvironment = (
@@ -118,11 +135,5 @@ export const validateApiTokenEnvironment = (
 
     if (!selectedEnvironment) {
         throw new BadDataError(`Environment=${environment} does not exist`);
-    }
-
-    if (!selectedEnvironment.enabled) {
-        throw new BadDataError(
-            'Client token cannot be scoped to disabled environments',
-        );
     }
 };

@@ -1,9 +1,13 @@
-import fetch, { Response } from 'node-fetch';
+import fetch from 'make-fetch-happen';
 import { addonDefinitionSchema } from './addon-schema';
-import { IUnleashConfig } from '../types/option';
-import { Logger } from '../logger';
-import { IAddonDefinition } from '../types/model';
-import { IEvent } from '../types/events';
+import type { Logger } from '../logger';
+import type { IAddonConfig, IAddonDefinition } from '../types/model';
+import type { IEvent } from '../types/events';
+import type { IntegrationEventsService } from '../features/integration-events/integration-events-service';
+import type { IntegrationEventWriteModel } from '../features/integration-events/integration-events-store';
+import type EventEmitter from 'events';
+import type { IFlagResolver } from '../types';
+import { ADDON_EVENTS_HANDLED } from '../metric-events';
 
 export default abstract class Addon {
     logger: Logger;
@@ -12,9 +16,20 @@ export default abstract class Addon {
 
     _definition: IAddonDefinition;
 
+    integrationEventsService: IntegrationEventsService;
+
+    eventBus: EventEmitter;
+
+    flagResolver: IFlagResolver;
+
     constructor(
         definition: IAddonDefinition,
-        { getLogger }: Pick<IUnleashConfig, 'getLogger'>,
+        {
+            getLogger,
+            integrationEventsService,
+            flagResolver,
+            eventBus,
+        }: IAddonConfig,
     ) {
         this.logger = getLogger(`addon/${definition.name}`);
         const { error } = addonDefinitionSchema.validate(definition);
@@ -27,6 +42,9 @@ export default abstract class Addon {
         }
         this._name = definition.name;
         this._definition = definition;
+        this.integrationEventsService = integrationEventsService;
+        this.eventBus = eventBus;
+        this.flagResolver = flagResolver;
     }
 
     get name(): string {
@@ -39,29 +57,48 @@ export default abstract class Addon {
 
     async fetchRetry(
         url: string,
-        options = {},
+        options: any = {},
         retries: number = 1,
-        backoff: number = 300,
     ): Promise<Response> {
-        const retryCodes = [408, 500, 502, 503, 504, 522, 524];
+        // biome-ignore lint/suspicious/noImplicitAnyLet: Due to calling upstream, it's not easy knowing the real type here
         let res;
         try {
-            res = await fetch(url, options);
-        } catch (error) {
-            res = { status: 500, ok: false };
-        }
-        if (res.ok) {
+            res = await fetch(url, {
+                retry: {
+                    retries,
+                },
+                ...options,
+            });
             return res;
-        }
-        if (retries > 0 && retryCodes.includes(res.status)) {
-            setTimeout(
-                () => this.fetchRetry(url, options, retries - 1, backoff * 2),
-                backoff,
+        } catch (e) {
+            const { method } = options;
+            this.logger.warn(
+                `Error querying ${url} with method ${
+                    method || 'GET'
+                } status code ${e.code}`,
+                e,
             );
+            res = { status: e.code, ok: false };
         }
         return res;
     }
 
     // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    abstract handleEvent(event: IEvent, parameters: any): Promise<void>;
+    abstract handleEvent(
+        event: IEvent,
+        parameters: any,
+        integrationId: number,
+    ): Promise<void>;
+
+    async registerEvent(
+        integrationEvent: IntegrationEventWriteModel,
+    ): Promise<void> {
+        await this.integrationEventsService.registerEvent(integrationEvent);
+        this.eventBus.emit(ADDON_EVENTS_HANDLED, {
+            result: integrationEvent.state,
+            destination: this.name,
+        });
+    }
+
+    destroy?(): void;
 }

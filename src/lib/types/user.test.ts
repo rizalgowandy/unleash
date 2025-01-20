@@ -5,7 +5,7 @@ test('should create user', () => {
     expect(user.name).toBe('ole');
     expect(user.email).toBe('some@email.com');
     expect(user.imageUrl).toBe(
-        'https://gravatar.com/avatar/d8ffeba65ee5baf57e4901690edc8e1b?size=42&default=retro',
+        'https://gravatar.com/avatar/676212ff796c79a3c06261eb10e3f455aa93998ee6e45263da13679c74b1e674?s=42&d=retro&r=g',
     );
 });
 
@@ -20,7 +20,7 @@ test('should create user, all fields', () => {
     expect(user.username).toBe('admin');
     expect(user.email).toBe('some@email.com');
     expect(user.imageUrl).toBe(
-        'https://gravatar.com/avatar/d8ffeba65ee5baf57e4901690edc8e1b?size=42&default=retro',
+        'https://gravatar.com/avatar/676212ff796c79a3c06261eb10e3f455aa93998ee6e45263da13679c74b1e674?s=42&d=retro&r=g',
     );
 });
 
@@ -39,15 +39,24 @@ test('Should create user with only email defined', () => {
 
 test('Should require valid email', () => {
     expect(() => {
-        new User({ id: 11, email: 'some@' }); // eslint-disable-line
-    }).toThrowError(Error('Email "value" must be a valid email'));
+        new User({ id: 11, email: 'some@' });
+    }).toThrow(Error('Email "value" must be a valid email'));
+});
+
+test('Should allow long emails on demo', () => {
+    expect(() => {
+        new User({
+            id: 11,
+            email: '0a1c1b6a59a582fdbe853739eefc599dxd1eb365eee385e345b5fc41f59172022a8f69c09f61121d8b4a155b792314ee@unleash.run',
+        });
+    }).not.toThrow();
 });
 
 test('Should create user with only username defined', () => {
     const user = new User({ id: 133, username: 'some-user' });
     expect(user.username).toBe('some-user');
     expect(user.imageUrl).toBe(
-        'https://gravatar.com/avatar/140fd5a002fb8d728a9848f8c9fcea2a?size=42&default=retro',
+        'https://gravatar.com/avatar/7e90ac329986624ba9929659913354473c6f965d5b559704409e3f933c0643b7?s=42&d=retro&r=g',
     );
 });
 

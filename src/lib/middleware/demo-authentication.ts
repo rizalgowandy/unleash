@@ -1,24 +1,37 @@
-import { Application } from 'express';
+import type { Application } from 'express';
 import AuthenticationRequired from '../types/authentication-required';
-import { IUnleashServices } from '../types/services';
-import { IUnleashConfig } from '../types/option';
+import type { IUnleashServices } from '../types/services';
+import type { IUnleashConfig } from '../types/option';
 import ApiUser from '../types/api-user';
 import { ApiTokenType } from '../types/models/api-token';
+import type { IAuthRequest, IUser } from '../server-impl';
+import type { IApiRequest } from '../routes/unleash-types';
+import { encrypt } from '../util';
 
 function demoAuthentication(
     app: Application,
-    basePath: string = '',
+    basePath: string,
     { userService }: Pick<IUnleashServices, 'userService'>,
-    { authentication }: Pick<IUnleashConfig, 'authentication'>,
+    {
+        authentication,
+        flagResolver,
+    }: Pick<IUnleashConfig, 'authentication' | 'flagResolver'>,
 ): void {
-    app.post(`${basePath}/auth/demo/login`, async (req, res) => {
-        const { email } = req.body;
+    app.post(`${basePath}/auth/demo/login`, async (req: IAuthRequest, res) => {
+        let { email } = req.body;
+        let user: IUser;
+
         try {
-            const user = await userService.loginUserWithoutPassword(
-                email,
-                true,
-            );
-            //@ts-ignore
+            if (authentication.demoAllowAdminLogin && email === 'admin') {
+                user = await userService.loginDemoAuthDefaultAdmin();
+            } else {
+                email = flagResolver.isEnabled('encryptEmails', { email })
+                    ? encrypt(email)
+                    : email;
+
+                user = await userService.loginUserWithoutPassword(email, true);
+            }
+
             req.session.user = user;
             return res.status(200).json(user);
         } catch (e) {
@@ -28,32 +41,28 @@ function demoAuthentication(
         }
     });
 
-    app.use(`${basePath}/api/admin/`, (req, res, next) => {
-        // @ts-ignore
-        if (req.session.user && req.session.user.email) {
-            // @ts-ignore
+    app.use(`${basePath}/api/admin/`, (req: IAuthRequest, res, next) => {
+        if (req.session.user?.email || req.session.user?.username === 'admin') {
             req.user = req.session.user;
         }
         next();
     });
 
-    app.use(`${basePath}/api/client`, (req, res, next) => {
-        // @ts-ignore
+    app.use(`${basePath}/api/client`, (req: IApiRequest, res, next) => {
         if (!authentication.enableApiToken && !req.user) {
-            // @ts-ignore
             req.user = new ApiUser({
-                username: 'unauthed-default-client',
+                tokenName: 'unauthed-default-client',
                 permissions: [],
                 environment: 'default',
                 type: ApiTokenType.CLIENT,
                 project: '*',
+                secret: 'a',
             });
         }
         next();
     });
 
-    app.use(`${basePath}/api`, (req, res, next) => {
-        // @ts-ignore
+    app.use(`${basePath}/api`, (req: IAuthRequest, res, next) => {
         if (req.user) {
             return next();
         }

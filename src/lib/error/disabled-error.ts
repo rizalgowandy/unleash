@@ -1,10 +1,7 @@
-import BaseError from './base-error';
+import { UnleashError } from './unleash-error';
 
-class DisabledError extends BaseError {
-    constructor(message: string) {
-        super(message, 422, 'DisabledError');
-        Error.captureStackTrace(this, this.constructor);
-    }
+class DisabledError extends UnleashError {
+    statusCode = 422;
 }
 
 export default DisabledError;

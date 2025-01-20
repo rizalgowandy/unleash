@@ -1,13 +1,17 @@
-import { Application, NextFunction, Request, Response } from 'express';
-import { setupAppWithCustomAuth } from '../../helpers/test-helper';
-import dbInit from '../../helpers/database-init';
+import type { Application, NextFunction, Request, Response } from 'express';
+import {
+    type IUnleashTest,
+    setupAppWithCustomAuth,
+} from '../../helpers/test-helper';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
 import getLogger from '../../../fixtures/no-logger';
-import { IUnleashConfig } from '../../../../lib/types/option';
-import { IUnleashServices } from '../../../../lib/types/services';
+import type { IUnleashConfig } from '../../../../lib/types/option';
+import type { IUnleashServices } from '../../../../lib/types/services';
+import type { IUnleashStores } from '../../../../lib/types';
 
-let stores;
-let db;
-let app;
+let stores: IUnleashStores;
+let db: ITestDb;
+let app: IUnleashTest;
 
 beforeAll(async () => {
     db = await dbInit('feedback_api_serial', getLogger);
@@ -33,7 +37,13 @@ beforeAll(async () => {
         );
     };
 
-    app = await setupAppWithCustomAuth(stores, preHook);
+    app = await setupAppWithCustomAuth(stores, preHook, {
+        experimental: {
+            flags: {
+                strictSchemaValidation: true,
+            },
+        },
+    });
 });
 
 afterAll(async () => {
@@ -65,7 +75,7 @@ test('it gives 400 when feedback is not present', async () => {
         .expect('Content-Type', /json/)
         .expect(400)
         .expect((res) => {
-            expect(res.body.error).toBeTruthy();
+            expect(res.body.name).toEqual('BadDataError');
         });
 });
 

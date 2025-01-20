@@ -1,8 +1,8 @@
-import {
+import type {
     FeatureEnvironmentKey,
     IFeatureEnvironmentStore,
 } from '../../lib/types/stores/feature-environment-store';
-import { IFeatureEnvironment } from '../../lib/types/model';
+import type { IFeatureEnvironment, IVariant } from '../../lib/types/model';
 import NotFoundError from '../../lib/error/notfound-error';
 
 export default class FakeFeatureEnvironmentStore
@@ -16,6 +16,34 @@ export default class FakeFeatureEnvironmentStore
         enabled: boolean,
     ): Promise<void> {
         this.featureEnvironments.push({ environment, enabled, featureName });
+    }
+
+    async addVariantsToFeatureEnvironment(
+        featureName: string,
+        environment: string,
+        variants: IVariant[],
+    ): Promise<void> {
+        this.setVariantsToFeatureEnvironments(
+            featureName,
+            [environment],
+            variants,
+        );
+    }
+
+    async setVariantsToFeatureEnvironments(
+        featureName: string,
+        environments: string[],
+        variants: IVariant[],
+    ): Promise<void> {
+        this.featureEnvironments
+            .filter(
+                (fe) =>
+                    fe.featureName === featureName &&
+                    environments.includes(fe.environment),
+            )
+            .forEach((fe) => {
+                fe.variants = variants;
+            });
     }
 
     async delete(key: FeatureEnvironmentKey): Promise<void> {
@@ -123,7 +151,7 @@ export default class FakeFeatureEnvironmentStore
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         projectId: string,
     ): Promise<void> {
-        return Promise.reject(new Error('Not implemented'));
+        return Promise.resolve(undefined);
     }
 
     async connectFeatures(
@@ -150,7 +178,7 @@ export default class FakeFeatureEnvironmentStore
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         projectId: string,
     ): Promise<void> {
-        return Promise.reject(new Error('Not implemented'));
+        return Promise.resolve();
     }
 
     disableEnvironmentIfNoStrategies(
@@ -160,5 +188,61 @@ export default class FakeFeatureEnvironmentStore
         environment: string,
     ): Promise<void> {
         return Promise.reject(new Error('Not implemented'));
+    }
+
+    copyEnvironmentFeaturesByProjects(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        sourceEnvironment: string,
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        destinationEnvironment: string,
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        projects: string[],
+    ): Promise<void> {
+        throw new Error('Method not implemented.');
+    }
+
+    cloneStrategies(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        sourceEnvironment: string,
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        destinationEnvironment: string,
+    ): Promise<void> {
+        throw new Error('Method not implemented.');
+    }
+
+    async addFeatureEnvironment(
+        featureEnvironment: IFeatureEnvironment,
+    ): Promise<void> {
+        this.featureEnvironments.push(featureEnvironment);
+        return Promise.resolve();
+    }
+
+    getEnvironmentsForFeature(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        featureName: string,
+    ): Promise<IFeatureEnvironment[]> {
+        throw new Error('Method not implemented.');
+    }
+
+    async getAllByFeatures(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        features: string[],
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        environment?: string,
+    ): Promise<IFeatureEnvironment[]> {
+        return this.featureEnvironments.filter(
+            (featureEnv) =>
+                (environment ? featureEnv.environment === environment : true) &&
+                features.includes(featureEnv.featureName),
+        );
+    }
+
+    async variantExists(featureName: string) {
+        return this.featureEnvironments.some(
+            (featureEnvironment) =>
+                featureEnvironment.featureName === featureName &&
+                featureEnvironment.variants &&
+                featureEnvironment.variants.length > 0,
+        );
     }
 }

@@ -1,8 +1,8 @@
-import { Logger } from '../logger';
-import { IUnleashStores } from '../types/stores';
-import { IUnleashConfig } from '../types/option';
-import User from '../types/user';
-import {
+import type { Logger } from '../logger';
+import type { IUnleashStores } from '../types/stores';
+import type { IUnleashConfig } from '../types/option';
+import type { IUser } from '../types/user';
+import type {
     IUserFeedback,
     IUserFeedbackStore,
 } from '../types/stores/user-feedback-store';
@@ -20,14 +20,14 @@ export default class UserFeedbackService {
         this.logger = getLogger('services/user-feedback-service.js');
     }
 
-    async getAllUserFeedback(user: User): Promise<IUserFeedback[]> {
+    async getAllUserFeedback(user: IUser): Promise<IUserFeedback[]> {
         if (user.isAPI) {
             return [];
         }
         try {
             return await this.userFeedbackStore.getAllUserFeedback(user.id);
         } catch (err) {
-            this.logger.error(err);
+            this.logger.error('Cannot read user feedback', err);
             return [];
         }
     }

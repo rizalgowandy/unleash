@@ -1,6 +1,6 @@
 import faker from 'faker';
-import { setupApp } from '../../helpers/test-helper';
-import dbInit from '../../helpers/database-init';
+import { type IUnleashTest, setupApp } from '../../helpers/test-helper';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
 import getLogger from '../../../fixtures/no-logger';
 import version from '../../../../lib/util/version';
 
@@ -10,8 +10,8 @@ const asyncFilter = async (arr, predicate) => {
     return arr.filter((_v, index) => results[index]);
 };
 
-let app;
-let db;
+let app: IUnleashTest;
+let db: ITestDb;
 
 beforeAll(async () => {
     db = await dbInit('register_client', getLogger);
@@ -39,7 +39,7 @@ test('should register client', async () => {
 
 test('should allow client to register multiple times', async () => {
     expect.assertions(2);
-    jest.useFakeTimers('modern');
+    jest.useFakeTimers();
     const { clientInstanceStore, clientApplicationsStore } = db.stores;
 
     const clientRegistration = {
@@ -61,6 +61,7 @@ test('should allow client to register multiple times', async () => {
         .expect(202);
 
     jest.advanceTimersByTime(6000);
+    // @ts-expect-error - Incomplete client registration
     expect(clientApplicationsStore.exists(clientRegistration)).toBeTruthy();
     expect(clientInstanceStore.exists(clientRegistration)).toBeTruthy();
     jest.useRealTimers();
@@ -69,7 +70,17 @@ test('should allow client to register multiple times', async () => {
 test.skip('Should handle a massive bulk registration', async () => {
     const { clientInstanceStore, clientApplicationsStore } = db.stores;
 
-    const clients = [];
+    const clients: {
+        appName: string;
+        instanceId: string;
+        strategies: string[];
+        started: number;
+        interval: number;
+        sdkVersion: string;
+        icon: string;
+        description: string;
+        color: string;
+    }[] = [];
     while (clients.length < 2000) {
         const clientRegistration = {
             appName: faker.internet.domainName(),

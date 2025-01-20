@@ -1,17 +1,24 @@
 import NotFoundError from '../../../lib/error/notfound-error';
-import dbInit from '../helpers/database-init';
+import dbInit, { type ITestDb } from '../helpers/database-init';
 import getLogger from '../../fixtures/no-logger';
+import type { IUnleashStores } from '../../../lib/types';
 
-let stores;
-let db;
+let stores: IUnleashStores;
+let db: ITestDb;
 
 beforeAll(async () => {
-    db = await dbInit('user_store_serial', getLogger);
+    db = await dbInit('user_store_serial', getLogger, {
+        experimental: { flags: {} },
+    });
     stores = db.stores;
 });
 
 afterAll(async () => {
     await db.destroy();
+});
+
+beforeEach(async () => {
+    await stores.userStore.deleteAll();
 });
 
 test('should have no users', async () => {
@@ -59,7 +66,7 @@ test('Should require email or username', async () => {
 test('should set password_hash for user', async () => {
     const store = stores.userStore;
     const user = await store.insert({ email: 'admin@mail.com' });
-    await store.setPasswordHash(user.id, 'rubbish');
+    await store.setPasswordHash(user.id, 'rubbish', 5);
     const hash = await store.getPasswordHash(user.id);
 
     expect(hash).toBe('rubbish');
@@ -75,9 +82,9 @@ test('should not get password_hash for unknown userId', async () => {
 test('should update loginAttempts for user', async () => {
     const store = stores.userStore;
     const user = { email: 'admin@mail.com' };
-    await store.upsert(user);
-    await store.incLoginAttempts(user);
-    await store.incLoginAttempts(user);
+    const updated_user = await store.upsert(user);
+    await store.incLoginAttempts(updated_user);
+    await store.incLoginAttempts(updated_user);
     const storedUser = await store.getByQuery(user);
 
     expect(storedUser.loginAttempts).toBe(2);
@@ -87,6 +94,7 @@ test('should not increment for user unknown user', async () => {
     const store = stores.userStore;
     const user = { email: 'another@mail.com' };
     await store.upsert(user);
+    // @ts-expect-error - Should just use email here
     await store.incLoginAttempts({ email: 'unknown@mail.com' });
     const storedUser = await store.getByQuery(user);
 
@@ -103,7 +111,20 @@ test('should reset user after successful login', async () => {
     const storedUser = await store.getByQuery(user);
 
     expect(storedUser.loginAttempts).toBe(0);
-    expect(storedUser.seenAt >= user.seenAt).toBe(true);
+    expect(storedUser.seenAt! >= user.seenAt!).toBe(true);
+});
+
+test('should return first login order for every new user', async () => {
+    const store = stores.userStore;
+    const user1 = await store.insert({ email: 'user1@mail.com' });
+    const user2 = await store.insert({ email: 'user2@mail.com' });
+    const user3 = await store.insert({ email: 'user3@mail.com' });
+
+    expect(await store.successfullyLogin(user1)).toBe(0);
+    expect(await store.successfullyLogin(user1)).toBe(0);
+    expect(await store.successfullyLogin(user2)).toBe(1);
+    expect(await store.successfullyLogin(user1)).toBe(0);
+    expect(await store.successfullyLogin(user3)).toBe(2);
 });
 
 test('should only update specified fields on user', async () => {
@@ -159,4 +180,19 @@ test('should always lowercase emails on updates', async () => {
 
     storedUser = await store.get(storedUser.id);
     expect(storedUser.email).toBe(updatedUser.email.toLowerCase());
+});
+
+test('should delete user', async () => {
+    const user = await stores.userStore.upsert({
+        email: 'deleteuser@mail.com',
+    });
+
+    await stores.userStore.delete(user.id);
+
+    await expect(() => stores.userStore.get(user.id)).rejects.toThrow(
+        new NotFoundError('No user found'),
+    );
+
+    const deletedCount = await stores.userStore.countRecentlyDeleted();
+    expect(deletedCount).toBe(1);
 });

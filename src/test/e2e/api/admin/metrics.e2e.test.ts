@@ -1,13 +1,31 @@
-import dbInit, { ITestDb } from '../../helpers/database-init';
-import { IUnleashTest, setupApp } from '../../helpers/test-helper';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
+import {
+    type IUnleashTest,
+    setupAppWithCustomConfig,
+} from '../../helpers/test-helper';
 import getLogger from '../../../fixtures/no-logger';
+import { ApiTokenType } from '../../../../lib/types/models/api-token';
 
 let app: IUnleashTest;
 let db: ITestDb;
 
 beforeAll(async () => {
-    db = await dbInit('metrics_serial', getLogger);
-    app = await setupApp(db.stores);
+    db = await dbInit('metrics_serial', getLogger, {
+        experimental: {
+            flags: {},
+        },
+    });
+    app = await setupAppWithCustomConfig(
+        db.stores,
+        {
+            experimental: {
+                flags: {
+                    strictSchemaValidation: true,
+                },
+            },
+        },
+        db.rawDatabase,
+    );
 });
 
 beforeEach(async () => {
@@ -44,6 +62,14 @@ beforeEach(async () => {
         appName: 'deletable-app',
         instanceId: 'inst-1',
     });
+
+    await app.services.clientInstanceService.createApplication({
+        appName: 'usage-app',
+        strategies: ['default'],
+        description: 'Some desc',
+        projects: ['default'],
+        environment: 'dev',
+    });
 });
 
 afterAll(async () => {
@@ -74,7 +100,7 @@ test('should get list of applications', async () => {
         .expect('Content-Type', /json/)
         .expect(200)
         .expect((res) => {
-            expect(res.body.applications).toHaveLength(3);
+            expect(res.body.applications).toHaveLength(4);
         });
 });
 
@@ -89,7 +115,7 @@ test('should delete application', async () => {
         .get('/api/admin/metrics/applications')
         .expect('Content-Type', /json/)
         .expect((res) => {
-            expect(res.body.applications).toHaveLength(2);
+            expect(res.body.applications).toHaveLength(3);
         });
 });
 
@@ -100,4 +126,76 @@ test('deleting an application should be idempotent, so expect 200', async () => 
         .expect((res) => {
             expect(res.status).toBe(200);
         });
+});
+
+test('should get list of application usage', async () => {
+    const { body } = await app.request
+        .get('/api/admin/metrics/applications')
+        .expect('Content-Type', /json/)
+        .expect(200);
+    const application = body.applications.find(
+        (selectableApp) => selectableApp.appName === 'usage-app',
+    );
+    expect(application).toMatchObject({
+        appName: 'usage-app',
+        usage: [
+            {
+                project: 'default',
+                environments: ['dev'],
+            },
+        ],
+    });
+});
+
+test('should save multiple projects from token', async () => {
+    await db.reset();
+    await db.stores.projectStore.create({
+        id: 'mainProject',
+        name: 'mainProject',
+    });
+
+    const multiProjectToken =
+        await app.services.apiTokenService.createApiTokenWithProjects({
+            type: ApiTokenType.CLIENT,
+            projects: ['default', 'mainProject'],
+            environment: 'default',
+            tokenName: 'tester',
+        });
+
+    await app.request
+        .post('/api/client/register')
+        .set('Authorization', multiProjectToken.secret)
+        .send({
+            appName: 'multi-project-app',
+            instanceId: 'instance-1',
+            strategies: ['default'],
+            started: Date.now(),
+            interval: 10,
+        });
+
+    await app.services.clientInstanceService.bulkAdd();
+
+    const { body } = await app.request
+        .get('/api/admin/metrics/applications')
+        .expect('Content-Type', /json/)
+        .expect(200);
+
+    expect(body).toMatchObject({
+        applications: [
+            {
+                appName: 'multi-project-app',
+                usage: [
+                    {
+                        environments: ['default'],
+                        project: 'default',
+                    },
+                    {
+                        environments: ['default'],
+                        project: 'mainProject',
+                    },
+                ],
+            },
+        ],
+        total: 1,
+    });
 });

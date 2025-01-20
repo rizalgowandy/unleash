@@ -1,18 +1,23 @@
 import faker from 'faker';
-import dbInit from '../helpers/database-init';
+import dbInit, { type ITestDb } from '../helpers/database-init';
 import getLogger from '../../fixtures/no-logger';
+import type {
+    IClientApplicationsStore,
+    IUnleashStores,
+} from '../../../lib/types';
+import type { IClientApplication } from '../../../lib/types/stores/client-applications-store';
 
-let db;
-let stores;
-let clientApplicationsStore;
+let db: ITestDb;
+let stores: IUnleashStores;
+let clientApplicationsStore: IClientApplicationsStore;
 
-beforeEach(async () => {
+beforeAll(async () => {
     db = await dbInit('client_application_store_e2e_serial', getLogger);
     stores = db.stores;
     clientApplicationsStore = stores.clientApplicationsStore;
 });
 
-afterEach(async () => {
+afterAll(async () => {
     await db.destroy();
 });
 
@@ -61,7 +66,10 @@ test('Multiple instances should still only announce once per app', async () => {
 });
 
 test('Multiple applications should also be possible to announce', async () => {
-    const clients = [];
+    const clients: Omit<
+        IClientApplication,
+        'createdAt' | 'updatedAt' | 'lastSeen' | 'announced' | 'url'
+    >[] = [];
     while (clients.length < 10) {
         const clientRegistration = {
             appName: `${faker.internet.domainName()}_${clients.length}`,
@@ -73,6 +81,8 @@ test('Multiple applications should also be possible to announce', async () => {
             icon: '',
             description: faker.company.catchPhrase(),
             color: faker.internet.color(),
+            createdBy: 'test',
+            createdByUserId: -1337,
         };
         clients.push(clientRegistration);
     }
@@ -125,7 +135,7 @@ test('Merge keeps value for single row in database', async () => {
         appName: clientRegistration.appName,
         description: 'new description',
     });
-    const stored = await clientApplicationsStore.getApplication(
+    const stored = await clientApplicationsStore.get(
         clientRegistration.appName,
     );
     expect(stored.color).toBe(clientRegistration.color);
@@ -133,7 +143,10 @@ test('Merge keeps value for single row in database', async () => {
 });
 
 test('Multi row merge also works', async () => {
-    const clients = [];
+    const clients: Omit<
+        IClientApplication,
+        'createdAt' | 'updatedAt' | 'lastSeen' | 'announced' | 'url'
+    >[] = [];
     while (clients.length < 10) {
         const clientRegistration = {
             appName: `${faker.internet.domainName()}_${clients.length}`,
@@ -143,6 +156,8 @@ test('Multi row merge also works', async () => {
             icon: faker.internet.color(),
             description: faker.company.catchPhrase(),
             color: faker.internet.color(),
+            createdBy: 'test-user',
+            createdByUserId: -1337,
         };
         clients.push(clientRegistration);
     }
@@ -153,9 +168,7 @@ test('Multi row merge also works', async () => {
     }));
     await clientApplicationsStore.bulkUpsert(alteredClients);
     const stored = await Promise.all(
-        clients.map(async (c) =>
-            clientApplicationsStore.getApplication(c.appName),
-        ),
+        clients.map(async (c) => clientApplicationsStore.get(c.appName!)),
     );
     stored.forEach((s, i) => {
         expect(s.description).toBe(clients[i].description);

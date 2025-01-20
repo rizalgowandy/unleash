@@ -9,7 +9,29 @@ test('should require URL firendly name', () => {
     };
 
     const { error } = featureSchema.validate(toggle);
-    expect(error.details[0].message).toEqual('"name" must be URL friendly');
+    expect(error?.details[0].message).toEqual('"name" must be URL friendly');
+});
+
+test("shouldn't allow . nor .. as name", () => {
+    const toggle1 = {
+        name: '.',
+        enabled: false,
+        impressionData: false,
+        strategies: [{ name: 'default' }],
+    };
+    const toggle2 = {
+        name: '..',
+        enabled: false,
+        impressionData: false,
+        strategies: [{ name: 'default' }],
+    };
+
+    expect(featureSchema.validate(toggle1).error?.details[0].message).toEqual(
+        '"name" must be URL friendly',
+    );
+    expect(featureSchema.validate(toggle2).error?.details[0].message).toEqual(
+        '"name" must be URL friendly',
+    );
 });
 
 test('should be valid toggle name', () => {
@@ -70,6 +92,56 @@ test('should allow weightType=fix', () => {
     expect(value).toEqual(toggle);
 });
 
+test('should not allow weightType=fix with floats', () => {
+    const toggle = {
+        name: 'app.name',
+        type: 'release',
+        project: 'default',
+        enabled: false,
+        impressionData: false,
+        stale: false,
+        archived: false,
+        strategies: [{ name: 'default' }],
+        variants: [
+            {
+                name: 'variant-a',
+                weight: 1.5,
+                weightType: 'fix',
+                stickiness: 'default',
+            },
+        ],
+    };
+
+    const { error } = featureSchema.validate(toggle);
+    expect(error?.details[0].message).toEqual('Weight only supports 1 decimal');
+});
+
+test('should not allow weightType=fix with more than 1000', () => {
+    const toggle = {
+        name: 'app.name',
+        type: 'release',
+        project: 'default',
+        enabled: false,
+        impressionData: false,
+        stale: false,
+        archived: false,
+        strategies: [{ name: 'default' }],
+        variants: [
+            {
+                name: 'variant-a',
+                weight: 1001,
+                weightType: 'fix',
+                stickiness: 'default',
+            },
+        ],
+    };
+
+    const { error } = featureSchema.validate(toggle);
+    expect(error?.details[0].message).toEqual(
+        '"variants[0].weight" must be less than or equal to 1000',
+    );
+});
+
 test('should disallow weightType=unknown', () => {
     const toggle = {
         name: 'app.name',
@@ -89,7 +161,7 @@ test('should disallow weightType=unknown', () => {
     };
 
     const { error } = featureSchema.validate(toggle);
-    expect(error.details[0].message).toEqual(
+    expect(error?.details[0].message).toEqual(
         '"variants[0].weightType" must be one of [variable, fix]',
     );
 });
@@ -205,7 +277,7 @@ test('should not accept empty constraint values', () => {
     };
 
     const { error } = featureSchema.validate(toggle);
-    expect(error.details[0].message).toEqual(
+    expect(error?.details[0].message).toEqual(
         '"strategies[0].constraints[0].values[0]" is not allowed to be empty',
     );
 });
@@ -250,7 +322,7 @@ test('Filter queries should reject tag values with missing type prefix', () => {
         tag: ['simple', 'simple'],
     };
     const { error } = querySchema.validate(query);
-    expect(error.details[0].message).toEqual(
+    expect(error?.details[0].message).toEqual(
         '"tag[0]" with value "simple" fails to match the tag pattern',
     );
 });
@@ -268,7 +340,7 @@ test('Filter queries should reject project names that are not alphanum', () => {
         project: ['project name with space'],
     };
     const { error } = querySchema.validate(query);
-    expect(error.details[0].message).toEqual(
+    expect(error?.details[0].message).toEqual(
         '"project[0]" must be URL friendly',
     );
 });

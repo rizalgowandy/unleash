@@ -1,11 +1,20 @@
 import { ADMIN } from '../../types/permissions';
-import { TemplateFormat } from '../../services/email-service';
-import { IUnleashConfig } from '../../types/option';
-import { IUnleashServices } from '../../types/services';
-
-const Controller = require('../controller');
+import {
+    type EmailService,
+    TemplateFormat,
+} from '../../services/email-service';
+import type { IUnleashConfig } from '../../types/option';
+import type { IUnleashServices } from '../../types/services';
+import type { Request, Response } from 'express';
+import Controller from '../controller';
+import type { Logger } from '../../logger';
+import sanitize from 'sanitize-filename';
 
 export default class EmailController extends Controller {
+    private emailService: EmailService;
+
+    private logger: Logger;
+
     constructor(
         config: IUnleashConfig,
         { emailService }: Pick<IUnleashServices, 'emailService'>,
@@ -17,12 +26,11 @@ export default class EmailController extends Controller {
         this.get('/preview/text/:template', this.getTextPreview, ADMIN);
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    async getHtmlPreview(req, res): Promise<void> {
+    async getHtmlPreview(req: Request, res: Response): Promise<void> {
         const { template } = req.params;
         const ctx = req.query;
         const data = await this.emailService.compileTemplate(
-            template,
+            sanitize(template),
             TemplateFormat.HTML,
             ctx,
         );
@@ -32,12 +40,11 @@ export default class EmailController extends Controller {
         res.end();
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    async getTextPreview(req, res) {
+    async getTextPreview(req: Request, res: Response): Promise<void> {
         const { template } = req.params;
         const ctx = req.query;
         const data = await this.emailService.compileTemplate(
-            template,
+            sanitize(template),
             TemplateFormat.PLAIN,
             ctx,
         );

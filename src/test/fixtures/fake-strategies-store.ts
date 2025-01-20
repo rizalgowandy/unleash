@@ -1,31 +1,36 @@
-import {
+import type {
     IEditableStrategy,
     IMinimalStrategy,
     IStrategy,
+    IStrategyImport,
     IStrategyStore,
 } from '../../lib/types/stores/strategy-store';
 import NotFoundError from '../../lib/error/notfound-error';
 
 export default class FakeStrategiesStore implements IStrategyStore {
+    count(): Promise<number> {
+        return Promise.resolve(0);
+    }
+
     defaultStrategy: IStrategy = {
         name: 'default',
         description: 'default strategy',
         displayName: 'Default',
         editable: false,
-        parameters: {},
+        parameters: [],
         deprecated: false,
     };
 
     strategies: IStrategy[] = [this.defaultStrategy];
 
     async createStrategy(update: IMinimalStrategy): Promise<void> {
-        let params;
+        let params: object[];
         if (
             typeof update.parameters === 'string' ||
             typeof update.parameters === 'number'
         ) {
             if (update.parameters === '') {
-                params = {};
+                params = [];
             } else {
                 params = JSON.parse(update.parameters);
             }
@@ -100,7 +105,7 @@ export default class FakeStrategiesStore implements IStrategyStore {
         throw new NotFoundError(`Could not find strategy with name: ${name}`);
     }
 
-    async importStrategy(data: IMinimalStrategy): Promise<void> {
+    async importStrategy(data: IStrategyImport): Promise<void> {
         return this.createStrategy(data);
     }
 

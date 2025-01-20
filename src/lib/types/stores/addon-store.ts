@@ -1,16 +1,19 @@
-import { Store } from './store';
+import type { Store } from './store';
 
 export interface IAddonDto {
     provider: string;
-    description: string;
+    description?: string | null;
     enabled: boolean;
-    parameters: object;
+    parameters: Record<string, unknown>;
+    projects?: string[];
+    environments?: string[];
     events: string[];
 }
 
 export interface IAddon extends IAddonDto {
     id: number;
     createdAt: Date;
+    description: string | null;
 }
 
 export interface IAddonStore extends Store<IAddon, number> {

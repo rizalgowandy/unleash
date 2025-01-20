@@ -1,13 +1,22 @@
-import dbInit from '../../helpers/database-init';
-import { setupApp } from '../../helpers/test-helper';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
+import {
+    type IUnleashTest,
+    setupAppWithCustomConfig,
+} from '../../helpers/test-helper';
 import getLogger from '../../../fixtures/no-logger';
 
-let app;
-let db;
+let app: IUnleashTest;
+let db: ITestDb;
 
 beforeAll(async () => {
     db = await dbInit('tag_api_serial', getLogger);
-    app = await setupApp(db.stores);
+    app = await setupAppWithCustomConfig(db.stores, {
+        experimental: {
+            flags: {
+                strictSchemaValidation: true,
+            },
+        },
+    });
 });
 
 afterAll(async () => {
@@ -62,13 +71,13 @@ test('Can create a tag', async () =>
     app.request
         .post('/api/admin/tags')
         .send({
-            id: 1,
             value: 'TeamRed',
             type: 'simple',
         })
         .expect((res) => {
             expect(res.status).toBe(201);
         }));
+
 test('Can validate a tag', async () =>
     app.request
         .post('/api/admin/tags')
@@ -79,11 +88,8 @@ test('Can validate a tag', async () =>
         .expect('Content-Type', /json/)
         .expect(400)
         .expect((res) => {
-            expect(res.body.details.length).toBe(2);
-            expect(res.body.details[0].message).toBe(
-                '"value" must be a string',
-            );
-            expect(res.body.details[1].message).toBe(
+            expect(res.body.details.length).toBe(1);
+            expect(res.body.details[0].message).toMatch(
                 '"type" must be URL friendly',
             );
         }));
@@ -104,4 +110,112 @@ test('Can delete a tag', async () => {
                 ),
             ).toBe(-1);
         });
+});
+
+test('Can tag features', async () => {
+    const featureName = 'test.feature';
+    const featureName2 = 'test.feature2';
+    const addedTag = {
+        value: 'TeamRed',
+        type: 'simple',
+    };
+    const removedTag = {
+        value: 'remove_me',
+        type: 'simple',
+    };
+    await app.request.post('/api/admin/projects/default/features').send({
+        name: featureName,
+        type: 'kill-switch',
+        enabled: true,
+        strategies: [{ name: 'default' }],
+    });
+
+    await db.stores.tagStore.createTag(removedTag);
+    await db.stores.featureTagStore.tagFeature(featureName, removedTag, -1337);
+
+    const initialTagState = await app.request.get(
+        `/api/admin/features/${featureName}/tags`,
+    );
+
+    expect(initialTagState.body).toMatchObject({ tags: [removedTag] });
+
+    await app.request.post('/api/admin/projects/default/features').send({
+        name: featureName2,
+        type: 'kill-switch',
+        enabled: true,
+        strategies: [{ name: 'default' }],
+    });
+
+    await app.request.put('/api/admin/projects/default/tags').send({
+        features: [featureName, featureName2],
+        tags: {
+            addedTags: [addedTag],
+            removedTags: [removedTag],
+        },
+    });
+    const res = await app.request.get(
+        `/api/admin/features/${featureName}/tags`,
+    );
+
+    const res2 = await app.request.get(
+        `/api/admin/features/${featureName2}/tags`,
+    );
+
+    expect(res.body).toMatchObject({ tags: [addedTag] });
+    expect(res2.body).toMatchObject({ tags: [addedTag] });
+});
+
+test('Can bulk remove tags', async () => {
+    const featureName = 'test.feature3';
+    const featureName2 = 'test.feature4';
+    const addedTag = {
+        value: 'TeamRed',
+        type: 'simple',
+    };
+
+    await app.request.post('/api/admin/projects/default/features').send({
+        name: featureName,
+        type: 'kill-switch',
+        enabled: true,
+        strategies: [{ name: 'default' }],
+    });
+
+    await app.request
+        .post('/api/admin/projects/default/features')
+        .send({
+            name: featureName2,
+            type: 'kill-switch',
+            enabled: true,
+            strategies: [{ name: 'default' }],
+        })
+        .expect(201);
+
+    await app.request
+        .put('/api/admin/projects/default/tags')
+        .send({
+            features: [featureName, featureName2],
+            tags: {
+                addedTags: [addedTag],
+                removedTags: [],
+            },
+        })
+        .expect(200);
+
+    await app.request
+        .put('/api/admin/projects/default/tags')
+        .send({
+            features: [featureName, featureName2],
+            tags: {
+                addedTags: [],
+                removedTags: [addedTag],
+            },
+        })
+        .expect(200);
+});
+
+test('backward compatibility: the API should return invalid tag names if they exist', async () => {
+    const tag = { value: '  ', type: 'simple' };
+    await db.stores.tagStore.createTag(tag);
+    const { body } = await app.request.get('/api/admin/tags').expect(200);
+    expect(body.tags).toContainEqual(tag);
 });

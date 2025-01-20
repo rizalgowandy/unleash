@@ -1,13 +1,17 @@
-import { URL } from 'url';
+import type { URL } from 'url';
 import EventEmitter from 'events';
 import { createTestConfig } from '../../../config/test-config';
-import { IUnleashConfig } from '../../../../lib/types/option';
+import type { IUnleashConfig } from '../../../../lib/types/option';
 import UserService from '../../../../lib/services/user-service';
 import { AccessService } from '../../../../lib/services/access-service';
 import ResetTokenService from '../../../../lib/services/reset-token-service';
-import { IUser } from '../../../../lib/types/user';
-import { setupApp, setupAppWithAuth } from '../../helpers/test-helper';
-import dbInit from '../../helpers/database-init';
+import type { IUser } from '../../../../lib/types/user';
+import {
+    type IUnleashTest,
+    setupApp,
+    setupAppWithAuth,
+} from '../../helpers/test-helper';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
 import getLogger from '../../../fixtures/no-logger';
 import { EmailService } from '../../../../lib/services/email-service';
 import SessionStore from '../../../../lib/db/session-store';
@@ -15,10 +19,13 @@ import SessionService from '../../../../lib/services/session-service';
 import { RoleName } from '../../../../lib/types/model';
 import SettingService from '../../../../lib/services/setting-service';
 import FakeSettingStore from '../../../fixtures/fake-setting-store';
+import { GroupService } from '../../../../lib/services/group-service';
+import { type IUnleashStores, TEST_AUDIT_USER } from '../../../../lib/types';
+import { createEventsService } from '../../../../lib/features';
 
-let app;
-let stores;
-let db;
+let app: IUnleashTest;
+let stores: IUnleashStores;
+let db: ITestDb;
 const config: IUnleashConfig = createTestConfig({
     getLogger,
     server: {
@@ -47,38 +54,55 @@ beforeAll(async () => {
     db = await dbInit('reset_password_api_serial', getLogger);
     stores = db.stores;
     app = await setupApp(stores);
-    accessService = new AccessService(stores, config);
-    const emailService = new EmailService(config.email, config.getLogger);
+    const eventService = createEventsService(db.rawDatabase, config);
+    const groupService = new GroupService(stores, config, eventService);
+    accessService = new AccessService(
+        stores,
+        config,
+        groupService,
+        eventService,
+    );
+    const emailService = new EmailService(config);
     const sessionStore = new SessionStore(
-        db,
+        db.rawDatabase,
         new EventEmitter(),
         config.getLogger,
     );
     const sessionService = new SessionService({ sessionStore }, config);
     const settingService = new SettingService(
-        { settingStore: new FakeSettingStore() },
+        {
+            settingStore: new FakeSettingStore(),
+        },
         config,
+        eventService,
     );
     userService = new UserService(stores, config, {
         accessService,
         resetTokenService,
         emailService,
+        eventService,
         sessionService,
         settingService,
     });
     resetTokenService = new ResetTokenService(stores, config);
-    const adminRole = await accessService.getRootRole(RoleName.ADMIN);
-    adminUser = await userService.createUser({
-        username: 'admin@test.com',
-        rootRole: adminRole.id,
-    });
+    const adminRole = (await accessService.getPredefinedRole(RoleName.ADMIN))!;
+    adminUser = await userService.createUser(
+        {
+            username: 'admin@test.com',
+            rootRole: adminRole.id,
+        },
+        TEST_AUDIT_USER,
+    )!;
 
-    const userRole = await accessService.getRootRole(RoleName.EDITOR);
-    user = await userService.createUser({
-        username: 'test@test.com',
-        email: 'test@test.com',
-        rootRole: userRole.id,
-    });
+    const userRole = (await accessService.getPredefinedRole(RoleName.EDITOR))!;
+    user = await userService.createUser(
+        {
+            username: 'test@test.com',
+            email: 'test@test.com',
+            rootRole: userRole.id,
+        },
+        TEST_AUDIT_USER,
+    );
 });
 
 afterAll(async () => {
@@ -93,7 +117,7 @@ afterAll(async () => {
 test('Can validate token for password reset', async () => {
     const url = await resetTokenService.createResetPasswordUrl(
         user.id,
-        adminUser.username,
+        adminUser.username!,
     );
     const relative = getBackendResetUrl(url);
     return app.request
@@ -108,15 +132,15 @@ test('Can validate token for password reset', async () => {
 test('Can use token to reset password', async () => {
     const url = await resetTokenService.createResetPasswordUrl(
         user.id,
-        adminUser.username,
+        adminUser.username!,
     );
     const relative = getBackendResetUrl(url);
     // Can't login before reset
     await expect(async () =>
-        userService.loginUser(user.email, password),
+        userService.loginUser(user.email!, password),
     ).rejects.toThrow(Error);
 
-    let token;
+    let token: string | undefined;
     await app.request
         .get(relative)
         .expect(200)
@@ -131,17 +155,17 @@ test('Can use token to reset password', async () => {
             password,
         })
         .expect(200);
-    const loggedInUser = await userService.loginUser(user.email, password);
+    const loggedInUser = await userService.loginUser(user.email!, password);
     expect(user.email).toBe(loggedInUser.email);
 });
 
 test('Trying to reset password with same token twice does not work', async () => {
     const url = await resetTokenService.createResetPasswordUrl(
         user.id,
-        adminUser.username,
+        adminUser.username!,
     );
     const relative = getBackendResetUrl(url);
-    let token;
+    let token: string | undefined;
     await app.request
         .get(relative)
         .expect(200)
@@ -152,19 +176,17 @@ test('Trying to reset password with same token twice does not work', async () =>
     await app.request
         .post('/auth/reset/password')
         .send({
-            email: user.email,
             token,
-            password,
+            password: `${password}test`,
         })
         .expect(200);
     await app.request
         .post('/auth/reset/password')
         .send({
-            email: user.email,
             token,
-            password,
+            password: `${password}othertest`,
         })
-        .expect(403)
+        .expect(401)
         .expect((res) => {
             expect(res.body.details[0].message).toBeTruthy();
         });
@@ -184,15 +206,15 @@ test('Calling validate endpoint with already existing session should destroy ses
             email: 'user@mail.com',
         })
         .expect(200);
-    await request.get('/api/admin/features').expect(200);
+    await request.get('/api/admin/projects').expect(200);
     const url = await resetTokenService.createResetPasswordUrl(
         user.id,
-        adminUser.username,
+        adminUser.username!,
     );
     const relative = getBackendResetUrl(url);
 
     await request.get(relative).expect(200).expect('Content-Type', /json/);
-    await request.get('/api/admin/features').expect(401); // we no longer should have a valid session
+    await request.get('/api/admin/projects').expect(401); // we no longer should have a valid session
     await destroy();
 });
 
@@ -201,10 +223,10 @@ test('Calling reset endpoint with already existing session should logout/destroy
     const { request, destroy } = await setupAppWithAuth(stores);
     const url = await resetTokenService.createResetPasswordUrl(
         user.id,
-        adminUser.username,
+        adminUser.username!,
     );
     const relative = getBackendResetUrl(url);
-    let token;
+    let token: string | undefined;
     await request
         .get(relative)
         .expect(200)
@@ -218,16 +240,15 @@ test('Calling reset endpoint with already existing session should logout/destroy
             email: 'user@mail.com',
         })
         .expect(200);
-    await request.get('/api/admin/features').expect(200); // If we login we can access features endpoint
+    await request.get('/api/admin/projects').expect(200); // If we login we can access projects endpoint
     await request
         .post('/auth/reset/password')
         .send({
-            email: user.email,
             token,
-            password,
+            password: `${password}newpassword`,
         })
         .expect(200);
-    await request.get('/api/admin/features').expect(401); // we no longer have a valid session after using the reset password endpoint
+    await request.get('/api/admin/projects').expect(401); // we no longer have a valid session after using the reset password endpoint
     await destroy();
 });
 
@@ -245,10 +266,10 @@ test('Trying to change password to undefined should yield 400 without crashing t
 
     const url = await resetTokenService.createResetPasswordUrl(
         user.id,
-        adminUser.username,
+        adminUser.username!,
     );
     const relative = getBackendResetUrl(url);
-    let token;
+    let token: string | undefined;
     await app.request
         .get(relative)
         .expect(200)
@@ -259,9 +280,36 @@ test('Trying to change password to undefined should yield 400 without crashing t
     await app.request
         .post('/auth/reset/password')
         .send({
-            email: user.email,
             token,
             password: undefined,
         })
         .expect(400);
+});
+
+test('changing password should expire all active tokens', async () => {
+    const url = await resetTokenService.createResetPasswordUrl(
+        user.id,
+        adminUser.username!,
+    );
+    const relative = getBackendResetUrl(url);
+
+    const {
+        body: { token },
+    } = await app.request
+        .get(relative)
+        .expect(200)
+        .expect('Content-Type', /json/);
+
+    await app.request
+        .post(`/api/admin/user-admin/${user.id}/change-password`)
+        .send({ password: 'simple123-_ASsad' })
+        .expect(200);
+
+    await app.request
+        .post('/auth/reset/password')
+        .send({
+            token,
+            password,
+        })
+        .expect(401);
 });

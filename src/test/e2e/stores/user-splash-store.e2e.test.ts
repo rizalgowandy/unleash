@@ -1,13 +1,14 @@
-import { IUserSplashStore } from 'lib/types/stores/user-splash-store';
-import { IUserStore } from 'lib/types/stores/user-store';
-import dbInit from '../helpers/database-init';
+import type { IUserSplashStore } from '../../../lib/types/stores/user-splash-store';
+import type { IUserStore } from '../../../lib/types/stores/user-store';
+import dbInit, { type ITestDb } from '../helpers/database-init';
 import getLogger from '../../fixtures/no-logger';
+import type { IUnleashStores, IUser } from '../../../lib/types';
 
-let stores;
-let db;
+let stores: IUnleashStores;
+let db: ITestDb;
 let userSplashStore: IUserSplashStore;
 let userStore: IUserStore;
-let currentUser;
+let currentUser: IUser;
 
 beforeAll(async () => {
     db = await dbInit('user_splash_store', getLogger);
@@ -31,7 +32,9 @@ test('should create userSplash', async () => {
         userId: currentUser.id,
         seen: false,
     });
-    const userSplashs = await userSplashStore.getAllUserSplashs(currentUser.id);
+    const userSplashs = await userSplashStore.getAllUserSplashes(
+        currentUser.id,
+    );
     expect(userSplashs).toHaveLength(1);
     expect(userSplashs[0].splashId).toBe('some-id');
 });

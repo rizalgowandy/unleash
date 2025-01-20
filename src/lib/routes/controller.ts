@@ -1,31 +1,78 @@
-import { IRouter, Router, Request, Response } from 'express';
-import { Logger } from 'lib/logger';
-import { IUnleashConfig } from '../types/option';
-import { NONE } from '../types/permissions';
+import {
+    type IRouter,
+    Router,
+    type Request,
+    type Response,
+    type RequestHandler,
+} from 'express';
+import type { Logger } from '../logger';
+import { type IUnleashConfig, NONE } from '../types';
 import { handleErrors } from './util';
-import NoAccessError from '../error/no-access-error';
 import requireContentType from '../middleware/content_type_checker';
+import { PermissionError } from '../error';
+import { fromOpenApiValidationErrors } from '../error/bad-data-error';
+import { storeRequestedRoute } from '../middleware/response-time-metrics';
 
-interface IRequestHandler<
-    P = any,
-    ResBody = any,
-    ReqBody = any,
-    ReqQuery = any,
-> {
-    (
-        req: Request<P, ResBody, ReqBody, ReqQuery>,
-        res: Response<ResBody>,
-    ): Promise<void> | void;
+type IRequestHandler<P = any, ResBody = any, ReqBody = any, ReqQuery = any> = (
+    req: Request<P, ResBody, ReqBody, ReqQuery>,
+    res: Response<ResBody>,
+) => Promise<void> | void;
+
+type Permission = string | string[];
+
+interface IRouteOptionsBase {
+    path: string;
+    permission: Permission;
+    middleware?: RequestHandler[];
+    handler: IRequestHandler;
+    acceptedContentTypes?: string[];
 }
 
-const checkPermission = (permission) => async (req, res, next) => {
-    if (!permission || permission === NONE) {
+interface IRouteOptionsGet extends IRouteOptionsBase {
+    method: 'get';
+}
+
+interface IRouteOptionsNonGet extends IRouteOptionsBase {
+    method: 'post' | 'put' | 'patch' | 'delete';
+    acceptAnyContentType?: boolean;
+}
+
+type IRouteOptions = IRouteOptionsNonGet | IRouteOptionsGet;
+
+const checkPermission =
+    (permission: Permission = []) =>
+    async (req, res, next) => {
+        const permissions = (
+            Array.isArray(permission) ? permission : [permission]
+        ).filter((p) => p !== NONE);
+
+        if (!permissions.length) {
+            return next();
+        }
+        if (req.checkRbac && (await req.checkRbac(permissions))) {
+            return next();
+        }
+        return res.status(403).json(new PermissionError(permissions)).end();
+    };
+
+const checkPrivateProjectPermissions = () => async (req, res, next) => {
+    if (
+        !req.checkPrivateProjectPermissions ||
+        (await req.checkPrivateProjectPermissions())
+    ) {
         return next();
     }
-    if (req.checkRbac && (await req.checkRbac(permission))) {
-        return next();
+    return res.status(404).end();
+};
+
+const openAPIValidationMiddleware = async (err, req, res, next) => {
+    if (err?.status && err.validationErrors) {
+        const apiError = fromOpenApiValidationErrors(req, err.validationErrors);
+
+        res.status(apiError.statusCode).json(apiError);
+    } else {
+        next(err);
     }
-    return res.status(403).json(new NoAccessError(permission)).end();
 };
 
 /**
@@ -51,7 +98,7 @@ export default class Controller {
         this.config = config;
     }
 
-    wrap(handler: IRequestHandler): IRequestHandler {
+    private useRouteErrorHandler(handler: IRequestHandler): IRequestHandler {
         return async (req: Request, res: Response) => {
             try {
                 await handler(req, res);
@@ -61,75 +108,112 @@ export default class Controller {
         };
     }
 
-    get(path: string, handler: IRequestHandler, permission?: string): void {
-        this.app.get(
-            path,
-            checkPermission(permission),
-            this.wrap(handler.bind(this)),
+    private useContentTypeMiddleware(options: IRouteOptions): RequestHandler[] {
+        const { middleware = [], acceptedContentTypes = [] } = options;
+
+        return options.method === 'get' || options.acceptAnyContentType
+            ? middleware
+            : [requireContentType(...acceptedContentTypes), ...middleware];
+    }
+
+    route(options: IRouteOptions): void {
+        this.app[options.method](
+            options.path,
+            storeRequestedRoute,
+            checkPermission(options.permission),
+            checkPrivateProjectPermissions(),
+            this.useContentTypeMiddleware(options),
+            this.useRouteErrorHandler(options.handler.bind(this)),
         );
+
+        this.app.use(options.path, openAPIValidationMiddleware);
+    }
+
+    get(
+        path: string,
+        handler: IRequestHandler,
+        permission: Permission = NONE,
+    ): void {
+        this.route({
+            method: 'get',
+            path,
+            handler,
+            permission,
+        });
     }
 
     post(
         path: string,
         handler: IRequestHandler,
-        permission: string,
+        permission: Permission = NONE,
         ...acceptedContentTypes: string[]
     ): void {
-        this.app.post(
+        this.route({
+            method: 'post',
             path,
-            checkPermission(permission),
-            requireContentType(...acceptedContentTypes),
-            this.wrap(handler.bind(this)),
-        );
+            handler,
+            permission,
+            acceptedContentTypes,
+        });
     }
 
     put(
         path: string,
         handler: IRequestHandler,
-        permission: string,
+        permission: Permission = NONE,
         ...acceptedContentTypes: string[]
     ): void {
-        this.app.put(
+        this.route({
+            method: 'put',
             path,
-            checkPermission(permission),
-            requireContentType(...acceptedContentTypes),
-            this.wrap(handler.bind(this)),
-        );
+            handler,
+            permission,
+            acceptedContentTypes,
+        });
     }
 
     patch(
         path: string,
         handler: IRequestHandler,
-        permission: string,
+        permission: Permission = NONE,
         ...acceptedContentTypes: string[]
     ): void {
-        this.app.patch(
+        this.route({
+            method: 'patch',
             path,
-            checkPermission(permission),
-            requireContentType(...acceptedContentTypes),
-            this.wrap(handler.bind(this)),
-        );
+            handler,
+            permission,
+            acceptedContentTypes,
+        });
     }
 
-    delete(path: string, handler: IRequestHandler, permission: string): void {
-        this.app.delete(
+    delete(
+        path: string,
+        handler: IRequestHandler,
+        permission: Permission = NONE,
+    ): void {
+        this.route({
+            method: 'delete',
             path,
-            checkPermission(permission),
-            this.wrap(handler.bind(this)),
-        );
+            handler,
+            permission,
+            acceptAnyContentType: true,
+        });
     }
 
     fileupload(
         path: string,
         filehandler: IRequestHandler,
         handler: Function,
-        permission: string,
+        permission: Permission = NONE,
     ): void {
         this.app.post(
             path,
+            storeRequestedRoute,
             checkPermission(permission),
+            checkPrivateProjectPermissions(),
             filehandler.bind(this),
-            this.wrap(handler.bind(this)),
+            this.useRouteErrorHandler(handler.bind(this)),
         );
     }
 
@@ -137,7 +221,11 @@ export default class Controller {
         this.app.use(path, router);
     }
 
-    get router(): any {
+    useWithMiddleware(path: string, router: IRouter, middleware: any): void {
+        this.app.use(path, middleware, router);
+    }
+
+    get router(): IRouter {
         return this.app;
     }
 }

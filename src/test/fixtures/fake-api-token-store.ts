@@ -1,13 +1,19 @@
-import { IApiTokenStore } from '../../lib/types/stores/api-token-store';
-import { IApiToken, IApiTokenCreate } from '../../lib/types/models/api-token';
+import type { IApiTokenStore } from '../../lib/types/stores/api-token-store';
+import type {
+    ApiTokenType,
+    IApiToken,
+    IApiTokenCreate,
+} from '../../lib/types/models/api-token';
 
-import NotFoundError from '../../lib/error/notfound-error';
 import EventEmitter from 'events';
 
 export default class FakeApiTokenStore
     extends EventEmitter
     implements IApiTokenStore
 {
+    countByType(): Promise<Map<ApiTokenType, number>> {
+        return Promise.resolve(new Map());
+    }
     tokens: IApiToken[] = [];
 
     async delete(key: string): Promise<void> {
@@ -32,11 +38,8 @@ export default class FakeApiTokenStore
     }
 
     async get(key: string): Promise<IApiToken> {
-        const token = this.tokens.find((t) => t.secret === key);
-        if (token) {
-            return token;
-        }
-        throw new NotFoundError(`Could not find token with secret ${key}`);
+        // get can return undefined. See api-token-store.e2e.test.ts
+        return this.tokens.find((t) => t.secret === key);
     }
 
     async getAll(): Promise<IApiToken[]> {
@@ -44,13 +47,16 @@ export default class FakeApiTokenStore
     }
 
     async getAllActive(): Promise<IApiToken[]> {
-        return this.tokens.filter((token) => token.expiresAt > new Date());
+        return this.tokens.filter(
+            (token) => !token.expiresAt || token.expiresAt > new Date(),
+        );
     }
 
     async insert(newToken: IApiTokenCreate): Promise<IApiToken> {
         const apiToken = {
             createdAt: new Date(),
             project: newToken.projects?.join(',') || '*',
+            alias: null,
             ...newToken,
         };
         this.tokens.push(apiToken);
@@ -71,5 +77,23 @@ export default class FakeApiTokenStore
         const t = await this.get(secret);
         t.expiresAt = expiresAt;
         return t;
+    }
+
+    async countDeprecatedTokens(): Promise<{
+        orphanedTokens: number;
+        activeOrphanedTokens: number;
+        legacyTokens: number;
+        activeLegacyTokens: number;
+    }> {
+        return {
+            orphanedTokens: 0,
+            activeOrphanedTokens: 0,
+            legacyTokens: 0,
+            activeLegacyTokens: 0,
+        };
+    }
+
+    async countProjectTokens(): Promise<number> {
+        return 0;
     }
 }

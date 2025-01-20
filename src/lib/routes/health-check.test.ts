@@ -1,11 +1,11 @@
-import supertest from 'supertest';
+import supertest, { type Test } from 'supertest';
 import { createServices } from '../services';
 import { createTestConfig } from '../../test/config/test-config';
 
 import createStores from '../../test/fixtures/store';
 import getLogger from '../../test/fixtures/no-logger';
 import getApp from '../app';
-import { IUnleashStores } from '../types';
+import type TestAgent from 'supertest/lib/agent';
 
 async function getSetup() {
     const stores = createStores();
@@ -16,67 +16,25 @@ async function getSetup() {
     return {
         request: supertest(app),
         stores,
-        destroy: () => {
-            services.versionService.destroy();
-            services.clientInstanceService.destroy();
-            services.apiTokenService.destroy();
-        },
     };
 }
-let request;
-let destroy;
-let stores;
+let request: TestAgent<Test>;
 beforeEach(async () => {
     const setup = await getSetup();
     request = setup.request;
-    destroy = setup.destroy;
-    stores = setup.stores;
 });
 
 afterEach(() => {
-    destroy();
     getLogger.setMuteError(false);
 });
 
-test('should give 500 when db is failing', async () => {
-    jest.spyOn(global.console, 'error').mockImplementation(() => jest.fn());
-    const config = createTestConfig();
-    const failingStores: Partial<IUnleashStores> = {
-        // @ts-ignore
-        featureTypeStore: {
-            getAll: () => Promise.reject(new Error('db error')),
-        },
-        clientMetricsStore: {
-            // @ts-ignore
-            on: () => {},
-        },
-    };
-    // @ts-ignore
-    const services = createServices(failingStores, config);
-    // @ts-ignore
-    const app = await getApp(createTestConfig(), failingStores, services);
-    request = supertest(app);
-    getLogger.setMuteError(true);
-    expect.assertions(2);
-    stores.featureToggleStore.getAll = () =>
-        Promise.reject(new Error('db error'));
-    return request
-        .get('/health')
-        .expect(500)
-        .expect((res) => {
-            expect(res.status).toBe(500);
-            expect(res.body.health).toBe('BAD');
-        });
+test('should give 200 when ready', async () => {
+    await request.get('/health').expect(200);
 });
 
-test('should give 200 when db is not failing', () => {
-    expect.assertions(0);
-    return request.get('/health').expect(200);
-});
-
-test('should give health=GOOD when db is not failing', () => {
+test('should give health=GOOD  when ready', async () => {
     expect.assertions(2);
-    return request
+    await request
         .get('/health')
         .expect(200)
         .expect((res) => {

@@ -1,29 +1,32 @@
-import { TestResult } from 'owasp-password-strength-test';
+import type { TestResult } from 'owasp-password-strength-test';
+import { type ApiErrorSchema, UnleashError } from './unleash-error';
 
-class OwaspValidationError extends Error {
-    private errors: string[];
+type ValidationError = {
+    validationErrors: string[];
+    message: string;
+};
+
+class OwaspValidationError extends UnleashError {
+    statusCode = 400;
+
+    private details: [ValidationError];
 
     constructor(testResult: TestResult) {
+        const details = {
+            validationErrors: testResult.errors,
+            message: testResult.errors[0],
+        };
         super(testResult.errors[0]);
-        Error.captureStackTrace(this, this.constructor);
-        this.name = this.constructor.name;
-        this.errors = testResult.errors;
+
+        this.details = [details];
     }
 
-    toJSON(): any {
-        const obj = {
-            isJoi: true,
-            name: this.constructor.name,
-            details: [
-                {
-                    validationErrors: this.errors,
-                    message: this.errors[0],
-                },
-            ],
+    toJSON(): ApiErrorSchema {
+        return {
+            ...super.toJSON(),
+            details: this.details,
         };
-        return obj;
     }
 }
-
 export default OwaspValidationError;
 module.exports = OwaspValidationError;

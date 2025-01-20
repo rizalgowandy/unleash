@@ -1,5 +1,5 @@
-import { ITag } from '../../lib/types/model';
-import {
+import type { ITag } from '../../lib/types/model';
+import type {
     IFeatureAndTag,
     IFeatureTag,
     IFeatureTagStore,
@@ -15,6 +15,13 @@ export default class FakeFeatureTagStore implements IFeatureTagStore {
                 type: f.tagType,
                 value: f.tagValue,
             }));
+        return Promise.resolve(tags);
+    }
+
+    async getAllFeaturesForTag(tagValue: string): Promise<string[]> {
+        const tags = this.featureTags
+            .filter((f) => f.tagValue === tagValue)
+            .map((f) => f.featureName);
         return Promise.resolve(tags);
     }
 
@@ -39,11 +46,16 @@ export default class FakeFeatureTagStore implements IFeatureTagStore {
         return this.featureTags;
     }
 
-    async tagFeature(featureName: string, tag: ITag): Promise<ITag> {
+    async tagFeature(
+        featureName: string,
+        tag: ITag,
+        createdByUserId: number,
+    ): Promise<ITag> {
         this.featureTags.push({
             featureName,
             tagType: tag.type,
             tagValue: tag.value,
+            createdByUserId,
         });
         return Promise.resolve(tag);
     }
@@ -57,15 +69,17 @@ export default class FakeFeatureTagStore implements IFeatureTagStore {
         return Promise.resolve();
     }
 
-    async importFeatureTags(
-        featureTags: IFeatureTag[],
-    ): Promise<IFeatureAndTag[]> {
+    async tagFeatures(featureTags: IFeatureTag[]): Promise<IFeatureAndTag[]> {
         return Promise.all(
             featureTags.map(async (fT) => {
-                const saved = await this.tagFeature(fT.featureName, {
-                    value: fT.tagValue,
-                    type: fT.tagType,
-                });
+                const saved = await this.tagFeature(
+                    fT.featureName,
+                    {
+                        value: fT.tagValue,
+                        type: fT.tagType,
+                    },
+                    fT.createdByUserId,
+                );
                 return {
                     featureName: fT.featureName,
                     tag: saved,
@@ -82,6 +96,19 @@ export default class FakeFeatureTagStore implements IFeatureTagStore {
             return true;
         });
         return Promise.resolve();
+    }
+
+    getAllByFeatures(features: string[]): Promise<IFeatureTag[]> {
+        return Promise.resolve(
+            this.featureTags.filter((tag) =>
+                features.includes(tag.featureName),
+            ),
+        );
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    untagFeatures(featureTags: IFeatureTag[]): Promise<void> {
+        throw new Error('Method not implemented.');
     }
 }
 

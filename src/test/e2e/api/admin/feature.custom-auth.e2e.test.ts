@@ -1,11 +1,12 @@
 import { setupAppWithCustomAuth } from '../../helpers/test-helper';
 import AuthenticationRequired from '../../../../lib/types/authentication-required';
 
-import dbInit from '../../helpers/database-init';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
 import getLogger from '../../../fixtures/no-logger';
+import type { IUnleashStores } from '../../../../lib/types';
 
-let stores;
-let db;
+let stores: IUnleashStores;
+let db: ITestDb;
 
 beforeAll(async () => {
     db = await dbInit('feature_api_custom_auth', getLogger);
@@ -23,7 +24,7 @@ test('should require authenticated user', async () => {
     const preHook = (app) => {
         app.use('/api/admin/', (req, res) =>
             res
-                .status('401')
+                .status(401)
                 .json(
                     new AuthenticationRequired({
                         path: '/auth/demo/login',
@@ -35,11 +36,11 @@ test('should require authenticated user', async () => {
         );
     };
     const { request, destroy } = await setupAppWithCustomAuth(stores, preHook);
-    await request.get('/api/admin/features').expect(401);
+    await request.get('/api/admin/projects/default/features').expect(401);
     await destroy();
 });
 
-test('creates new feature toggle with createdBy', async () => {
+test('creates new feature flag with createdBy', async () => {
     expect.assertions(1);
     const email = 'custom-user@mail.com';
 
@@ -49,11 +50,16 @@ test('creates new feature toggle with createdBy', async () => {
             next();
         });
     };
-    const { request, destroy } = await setupAppWithCustomAuth(stores, preHook);
+    const { request, destroy } = await setupAppWithCustomAuth(
+        stores,
+        preHook,
+        {},
+        db.rawDatabase,
+    );
 
-    // create toggle
+    // create flag
     await request
-        .post('/api/admin/features')
+        .post('/api/admin/projects/default/features')
         .send({
             name: 'com.test.Username',
             enabled: false,

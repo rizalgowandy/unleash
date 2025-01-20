@@ -1,12 +1,18 @@
-import EventEmitter from 'events';
-import { Knex } from 'knex';
+import type EventEmitter from 'events';
 import NotFoundError from '../error/notfound-error';
-import {
+import type {
     IClientApplication,
+    IClientApplications,
+    IClientApplicationsSearchParams,
     IClientApplicationsStore,
 } from '../types/stores/client-applications-store';
-import { Logger, LogProvider } from '../logger';
-import { IApplicationQuery } from '../types/query';
+import type { Logger, LogProvider } from '../logger';
+import type { Db } from './db';
+import type { IApplicationOverview } from '../features/metrics/instance/models';
+import { applySearchFilters } from '../features/feature-search/search-utils';
+import type { IFlagResolver } from '../types';
+import metricsHelper from '../util/metrics-helper';
+import { DB_TIME } from '../metric-events';
 
 const COLUMNS = [
     'app_name',
@@ -21,6 +27,14 @@ const COLUMNS = [
 ];
 const TABLE = 'client_applications';
 
+const TABLE_USAGE = 'client_applications_usage';
+
+const DEPRECATED_STRATEGIES = [
+    'gradualRolloutRandom',
+    'gradualRolloutSessionId',
+    'gradualRolloutUserId',
+];
+
 const mapRow: (any) => IClientApplication = (row) => ({
     appName: row.app_name,
     createdAt: row.created_at,
@@ -33,7 +47,49 @@ const mapRow: (any) => IClientApplication = (row) => ({
     icon: row.icon,
     lastSeen: row.last_seen,
     announced: row.announced,
+    project: row.project,
+    environment: row.environment,
 });
+
+const reduceRows = (rows: any[]): IClientApplication[] => {
+    const appsObj = rows.reduce((acc, row) => {
+        // extracting project and environment from usage table
+        const { project, environment } = row;
+        const existingApp = acc[row.app_name];
+
+        if (existingApp) {
+            const existingProject = existingApp.usage.find(
+                (usage) => usage.project === project,
+            );
+
+            if (existingProject) {
+                existingProject.environments.push(environment);
+            } else {
+                existingApp.usage.push({
+                    project: project,
+                    environments: [environment],
+                });
+            }
+        } else {
+            acc[row.app_name] = {
+                ...mapRow(row),
+                usage:
+                    project && environment
+                        ? [
+                              {
+                                  project,
+                                  environments: [environment],
+                              },
+                          ]
+                        : [],
+            };
+        }
+
+        return acc;
+    }, {});
+
+    return Object.values(appsObj);
+};
 
 const remapRow = (input) => {
     const temp = {
@@ -60,23 +116,48 @@ const remapRow = (input) => {
 export default class ClientApplicationsStore
     implements IClientApplicationsStore
 {
-    private db: Knex;
+    private db: Db;
 
     private logger: Logger;
 
-    constructor(db: Knex, eventBus: EventEmitter, getLogger: LogProvider) {
+    private timer: Function;
+
+    private flagResolver: IFlagResolver;
+
+    constructor(
+        db: Db,
+        eventBus: EventEmitter,
+        getLogger: LogProvider,
+        flagResolver: IFlagResolver,
+    ) {
         this.db = db;
+        this.flagResolver = flagResolver;
         this.logger = getLogger('client-applications-store.ts');
+        this.timer = (action: string) =>
+            metricsHelper.wrapTimer(eventBus, DB_TIME, {
+                store: 'client-applications',
+                action,
+            });
     }
 
     async upsert(details: Partial<IClientApplication>): Promise<void> {
         const row = remapRow(details);
         await this.db(TABLE).insert(row).onConflict('app_name').merge();
+        const usageRows = this.remapUsageRow(details);
+        await this.db(TABLE_USAGE)
+            .insert(usageRows)
+            .onConflict(['app_name', 'project', 'environment'])
+            .merge();
     }
 
     async bulkUpsert(apps: Partial<IClientApplication>[]): Promise<void> {
         const rows = apps.map(remapRow);
+        const usageRows = apps.flatMap(this.remapUsageRow);
         await this.db(TABLE).insert(rows).onConflict('app_name').merge();
+        await this.db(TABLE_USAGE)
+            .insert(usageRows)
+            .onConflict(['app_name', 'project', 'environment'])
+            .merge();
     }
 
     async exists(appName: string): Promise<boolean> {
@@ -115,27 +196,62 @@ export default class ClientApplicationsStore
         return this.db(TABLE).where('app_name', appName).del();
     }
 
-    /**
-     * Could also be done in SQL:
-     * (not sure if it is faster though)
-     *
-     * SELECT app_name from (
-     *   SELECT app_name, json_array_elements(strategies)::text as strategyName from client_strategies
-     *   ) as foo
-     * WHERE foo.strategyName = '"other"';
-     */
-    async getAppsForStrategy(
-        query: IApplicationQuery,
-    ): Promise<IClientApplication[]> {
-        const rows = await this.db.select(COLUMNS).from(TABLE);
-        const apps = rows.map(mapRow);
+    async getApplications(
+        params: IClientApplicationsSearchParams,
+    ): Promise<IClientApplications> {
+        const { limit, offset, sortOrder = 'asc', searchParams } = params;
+        const validatedSortOrder =
+            sortOrder === 'asc' || sortOrder === 'desc' ? sortOrder : 'asc';
 
-        if (query.strategyName) {
-            return apps.filter((app) =>
-                app.strategies.includes(query.strategyName),
-            );
+        const query = this.db
+            .with('applications', (qb) => {
+                applySearchFilters(qb, searchParams, [
+                    'client_applications.app_name',
+                ]);
+                qb.select([
+                    ...COLUMNS.map((column) => `${TABLE}.${column}`),
+                    'project',
+                    'environment',
+                    this.db.raw(
+                        `DENSE_RANK() OVER (ORDER BY client_applications.app_name ${validatedSortOrder}) AS rank`,
+                    ),
+                ])
+                    .from(TABLE)
+                    .leftJoin(
+                        TABLE_USAGE,
+                        `${TABLE_USAGE}.app_name`,
+                        `${TABLE}.app_name`,
+                    );
+            })
+            .with(
+                'final_ranks',
+                this.db.raw(
+                    'select row_number() over (order by min(rank)) as final_rank from applications group by app_name',
+                ),
+            )
+            .with(
+                'total',
+                this.db.raw('select count(*) as total from final_ranks'),
+            )
+            .select('*')
+            .from('applications')
+            .joinRaw('CROSS JOIN total')
+            .whereBetween('rank', [offset + 1, offset + limit]);
+
+        const rows = await query;
+
+        if (rows.length !== 0) {
+            const applications = reduceRows(rows);
+            return {
+                applications,
+                total: Number(rows[0].total) || 0,
+            };
         }
-        return apps;
+
+        return {
+            applications: [],
+            total: 0,
+        };
     }
 
     async getUnannounced(): Promise<IClientApplication[]> {
@@ -181,4 +297,155 @@ export default class ClientApplicationsStore
 
         return mapRow(row);
     }
+
+    async getApplicationOverview(
+        appName: string,
+    ): Promise<IApplicationOverview> {
+        const stopTimer = this.timer('getApplicationOverview');
+        const query = this.db
+            .with('metrics', (qb) => {
+                qb.select([
+                    'cme.app_name',
+                    'cme.environment',
+                    'f.project',
+                    this.db.raw(
+                        'array_agg(DISTINCT cme.feature_name) as features',
+                    ),
+                ])
+                    .from('client_metrics_env as cme')
+                    .where('cme.app_name', appName)
+                    .leftJoin('features as f', 'f.name', 'cme.feature_name')
+                    .groupBy('cme.app_name', 'cme.environment', 'f.project');
+            })
+            .with('instances', (qb) => {
+                qb.select([
+                    'ci.app_name',
+                    'ci.environment',
+                    this.db.raw(
+                        'COUNT(DISTINCT ci.instance_id) as unique_instance_count',
+                    ),
+                    this.db.raw(
+                        'ARRAY_AGG(DISTINCT ci.sdk_version) FILTER (WHERE ci.sdk_version IS NOT NULL) as sdk_versions',
+                    ),
+                    this.db.raw('MAX(ci.last_seen) as latest_last_seen'),
+                ])
+                    .from('client_instances as ci')
+                    .where('ci.app_name', appName)
+                    .groupBy('ci.app_name', 'ci.environment');
+            })
+            .select([
+                'm.project',
+                'm.environment',
+                'm.features',
+                'i.unique_instance_count',
+                'i.sdk_versions',
+                'i.latest_last_seen',
+                'ca.strategies',
+            ])
+            .from('client_applications as ca')
+            .leftJoin('metrics as m', 'm.app_name', 'ca.app_name')
+            .leftJoin('instances as i', 'i.environment', 'm.environment')
+            .orderBy('m.environment', 'asc');
+        const rows = await query;
+        stopTimer();
+        if (!rows.length) {
+            throw new NotFoundError(`Could not find appName=${appName}`);
+        }
+        const existingStrategies: string[] = await this.db
+            .select('name')
+            .from('strategies')
+            .pluck('name');
+        return this.mapApplicationOverviewData(rows, existingStrategies);
+    }
+
+    mapApplicationOverviewData(
+        rows: any[],
+        existingStrategies: string[],
+    ): IApplicationOverview {
+        const featureCount = new Set(rows.flatMap((row) => row.features)).size;
+        const missingStrategies: Set<string> = new Set();
+
+        const environments = rows.reduce((acc, row) => {
+            const {
+                environment,
+                unique_instance_count,
+                sdk_versions,
+                latest_last_seen,
+                project,
+                features,
+                strategies,
+            } = row;
+
+            if (!environment) return acc;
+
+            strategies.forEach((strategy) => {
+                if (
+                    !DEPRECATED_STRATEGIES.includes(strategy) &&
+                    !existingStrategies.includes(strategy)
+                ) {
+                    missingStrategies.add(strategy);
+                }
+            });
+
+            const featuresNotMappedToProject = !project;
+
+            let env = acc.find((e) => e.name === environment);
+            if (!env) {
+                env = {
+                    name: environment,
+                    instanceCount: Number(unique_instance_count),
+                    sdks: sdk_versions || [],
+                    lastSeen: latest_last_seen,
+                    issues: {
+                        missingFeatures: featuresNotMappedToProject
+                            ? features
+                            : [],
+                    },
+                };
+                acc.push(env);
+            } else {
+                if (featuresNotMappedToProject) {
+                    env.issues.missingFeatures = features;
+                }
+            }
+
+            return acc;
+        }, []);
+        environments.forEach((env) => {
+            env.sdks.sort();
+        });
+
+        return {
+            projects: [
+                ...new Set(
+                    rows
+                        .filter((row) => row.project != null)
+                        .map((row) => row.project),
+                ),
+            ],
+            featureCount,
+            environments,
+            issues: {
+                missingStrategies: [...missingStrategies],
+            },
+        };
+    }
+
+    private remapUsageRow = (input) => {
+        if (!input.projects || input.projects.length === 0) {
+            return [
+                {
+                    app_name: input.appName,
+                    project: '*',
+                    environment: input.environment || '*',
+                },
+            ];
+        } else {
+            return input.projects.map((project) => ({
+                app_name: input.appName,
+                project: project,
+                environment: input.environment || '*',
+            }));
+        }
+    };
 }

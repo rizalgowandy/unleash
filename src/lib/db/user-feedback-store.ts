@@ -1,11 +1,11 @@
-import { Knex } from 'knex';
-import { EventEmitter } from 'events';
-import { LogProvider, Logger } from '../logger';
-import {
+import type { EventEmitter } from 'events';
+import type { LogProvider, Logger } from '../logger';
+import type {
     IUserFeedback,
     IUserFeedbackKey,
     IUserFeedbackStore,
 } from '../types/stores/user-feedback-store';
+import type { Db } from './db';
 
 const COLUMNS = ['given', 'user_id', 'feedback_id', 'nevershow'];
 const TABLE = 'user_feedback';
@@ -32,11 +32,11 @@ const rowToField = (row: IUserFeedbackTable): IUserFeedback => ({
 });
 
 export default class UserFeedbackStore implements IUserFeedbackStore {
-    private db: Knex;
+    private db: Db;
 
     private logger: Logger;
 
-    constructor(db: Knex, eventBus: EventEmitter, getLogger: LogProvider) {
+    constructor(db: Db, eventBus: EventEmitter, getLogger: LogProvider) {
         this.db = db;
         this.logger = getLogger('user-feedback-store.ts');
     }

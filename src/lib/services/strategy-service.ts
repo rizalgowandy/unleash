@@ -1,13 +1,21 @@
-import { Logger } from '../logger';
-import { IUnleashConfig } from '../types/option';
-import { IUnleashStores } from '../types/stores';
-import { IEventStore } from '../types/stores/event-store';
-import {
+import type { Logger } from '../logger';
+import type { IUnleashConfig } from '../types/option';
+import type { IUnleashStores } from '../types/stores';
+import type {
     IMinimalStrategy,
     IStrategy,
     IStrategyStore,
 } from '../types/stores/strategy-store';
 import NotFoundError from '../error/notfound-error';
+import type EventService from '../features/events/event-service';
+import {
+    type IAuditUser,
+    StrategyCreatedEvent,
+    StrategyDeletedEvent,
+    StrategyDeprecatedEvent,
+    StrategyReactivatedEvent,
+    StrategyUpdatedEvent,
+} from '../types';
 
 const strategySchema = require('./strategy-schema');
 const NameExistsError = require('../error/name-exists-error');
@@ -24,17 +32,15 @@ class StrategyService {
 
     private strategyStore: IStrategyStore;
 
-    private eventStore: IEventStore;
+    private eventService: EventService;
 
     constructor(
-        {
-            strategyStore,
-            eventStore,
-        }: Pick<IUnleashStores, 'strategyStore' | 'eventStore'>,
+        { strategyStore }: Pick<IUnleashStores, 'strategyStore'>,
         { getLogger }: Pick<IUnleashConfig, 'getLogger'>,
+        eventService: EventService,
     ) {
         this.strategyStore = strategyStore;
-        this.eventStore = eventStore;
+        this.eventService = eventService;
         this.logger = getLogger('services/strategy-service.js');
     }
 
@@ -48,34 +54,36 @@ class StrategyService {
 
     async removeStrategy(
         strategyName: string,
-        userName: string,
+        auditUser: IAuditUser,
     ): Promise<void> {
         const strategy = await this.strategyStore.get(strategyName);
         await this._validateEditable(strategy);
         await this.strategyStore.delete(strategyName);
-        await this.eventStore.store({
-            type: STRATEGY_DELETED,
-            createdBy: userName,
-            data: {
-                name: strategyName,
-            },
-        });
+        await this.eventService.storeEvent(
+            new StrategyDeletedEvent({
+                data: {
+                    name: strategyName,
+                },
+                auditUser,
+            }),
+        );
     }
 
     async deprecateStrategy(
         strategyName: string,
-        userName: string,
+        auditUser: IAuditUser,
     ): Promise<void> {
         if (await this.strategyStore.exists(strategyName)) {
             // Check existence
             await this.strategyStore.deprecateStrategy({ name: strategyName });
-            await this.eventStore.store({
-                type: STRATEGY_DEPRECATED,
-                createdBy: userName,
-                data: {
-                    name: strategyName,
-                },
-            });
+            await this.eventService.storeEvent(
+                new StrategyDeprecatedEvent({
+                    data: {
+                        name: strategyName,
+                    },
+                    auditUser,
+                }),
+            );
         } else {
             throw new NotFoundError(
                 `Could not find strategy with name ${strategyName}`,
@@ -85,47 +93,51 @@ class StrategyService {
 
     async reactivateStrategy(
         strategyName: string,
-        userName: string,
+        auditUser: IAuditUser,
     ): Promise<void> {
         await this.strategyStore.get(strategyName); // Check existence
         await this.strategyStore.reactivateStrategy({ name: strategyName });
-        await this.eventStore.store({
-            type: STRATEGY_REACTIVATED,
-            createdBy: userName,
-            data: {
-                name: strategyName,
-            },
-        });
+        await this.eventService.storeEvent(
+            new StrategyReactivatedEvent({
+                data: {
+                    name: strategyName,
+                },
+                auditUser,
+            }),
+        );
     }
 
     async createStrategy(
         value: IMinimalStrategy,
-        userName: string,
-    ): Promise<void> {
+        auditUser: IAuditUser,
+    ): Promise<IStrategy> {
         const strategy = await strategySchema.validateAsync(value);
         strategy.deprecated = false;
         await this._validateStrategyName(strategy);
         await this.strategyStore.createStrategy(strategy);
-        await this.eventStore.store({
-            type: STRATEGY_CREATED,
-            createdBy: userName,
-            data: strategy,
-        });
+        await this.eventService.storeEvent(
+            new StrategyCreatedEvent({
+                data: strategy,
+                auditUser,
+            }),
+        );
+        return this.strategyStore.get(strategy.name);
     }
 
     async updateStrategy(
         input: IMinimalStrategy,
-        userName: string,
+        auditUser: IAuditUser,
     ): Promise<void> {
         const value = await strategySchema.validateAsync(input);
         const strategy = await this.strategyStore.get(input.name);
         await this._validateEditable(strategy);
         await this.strategyStore.updateStrategy(value);
-        await this.eventStore.store({
-            type: STRATEGY_UPDATED,
-            createdBy: userName,
-            data: value,
-        });
+        await this.eventService.storeEvent(
+            new StrategyUpdatedEvent({
+                data: value,
+                auditUser,
+            }),
+        );
     }
 
     private _validateStrategyName(
@@ -147,7 +159,7 @@ class StrategyService {
 
     // This check belongs in the store.
     _validateEditable(strategy: IStrategy): void {
-        if (strategy.editable === false) {
+        if (!strategy.editable) {
             throw new Error(`Cannot edit strategy ${strategy.name}`);
         }
     }

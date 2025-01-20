@@ -1,5 +1,5 @@
-import { IFeatureEnvironment } from '../model';
-import { Store } from './store';
+import type { IFeatureEnvironment, IVariant } from '../model';
+import type { Store } from './store';
 
 export interface FeatureEnvironmentKey {
     featureName: string;
@@ -12,6 +12,13 @@ export interface IFeatureEnvironmentStore
         environment: string,
         featureName: string,
     ): Promise<boolean>;
+    getEnvironmentsForFeature(
+        featureName: string,
+    ): Promise<IFeatureEnvironment[]>;
+    getAllByFeatures(
+        features: string[],
+        environment?: string,
+    ): Promise<IFeatureEnvironment[]>;
     isEnvironmentEnabled(
         featureName: string,
         environment: string,
@@ -44,8 +51,39 @@ export interface IFeatureEnvironmentStore
     connectFeatureToEnvironmentsForProject(
         featureName: string,
         projectId: string,
+        enabledIn?: { [environment: string]: boolean },
     ): Promise<void>;
 
-    connectProject(environment: string, projectId: string): Promise<void>;
+    connectProject(
+        environment: string,
+        projectId: string,
+        idempotent?: boolean,
+    ): Promise<void>;
     disconnectProject(environment: string, projectId: string): Promise<void>;
+    copyEnvironmentFeaturesByProjects(
+        sourceEnvironment: string,
+        destinationEnvironment: string,
+        projects: string[],
+    ): Promise<void>;
+    cloneStrategies(
+        sourceEnvironment: string,
+        destinationEnvironment: string,
+    ): Promise<void>;
+    addVariantsToFeatureEnvironment(
+        featureName: string,
+        environment: string,
+        variants: IVariant[],
+    ): Promise<void>;
+
+    setVariantsToFeatureEnvironments(
+        featureName: string,
+        environments: string[],
+        variants: IVariant[],
+    ): Promise<void>;
+
+    addFeatureEnvironment(
+        featureEnvironment: IFeatureEnvironment,
+    ): Promise<void>;
+
+    variantExists(featureName: string): Promise<boolean>;
 }

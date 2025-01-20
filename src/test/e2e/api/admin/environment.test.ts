@@ -1,6 +1,9 @@
-import dbInit, { ITestDb } from '../../helpers/database-init';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
 import getLogger from '../../../fixtures/no-logger';
-import { IUnleashTest, setupApp } from '../../helpers/test-helper';
+import {
+    type IUnleashTest,
+    setupAppWithCustomConfig,
+} from '../../helpers/test-helper';
 import { DEFAULT_ENV } from '../../../../lib/util/constants';
 
 let app: IUnleashTest;
@@ -8,7 +11,17 @@ let db: ITestDb;
 
 beforeAll(async () => {
     db = await dbInit('environment_api_serial', getLogger);
-    app = await setupApp(db.stores);
+    app = await setupAppWithCustomConfig(
+        db.stores,
+        {
+            experimental: {
+                flags: {
+                    strictSchemaValidation: true,
+                },
+            },
+        },
+        db.rawDatabase,
+    );
 });
 
 afterAll(async () => {
@@ -29,6 +42,9 @@ test('Can list all existing environments', async () => {
                 sortOrder: 1,
                 type: 'production',
                 protected: true,
+                projectCount: 1,
+                apiTokenCount: 0,
+                enabledToggleCount: 0,
             });
         });
 });

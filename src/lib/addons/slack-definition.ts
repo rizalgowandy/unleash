@@ -13,18 +13,28 @@ import {
     FEATURE_METADATA_UPDATED,
     FEATURE_PROJECT_CHANGE,
     FEATURE_VARIANTS_UPDATED,
+    FEATURE_POTENTIALLY_STALE_ON,
 } from '../types/events';
-import { IAddonDefinition } from '../types/model';
+import type { IAddonDefinition } from '../types/model';
 
 const slackDefinition: IAddonDefinition = {
     name: 'slack',
     displayName: 'Slack',
     description: 'Allows Unleash to post updates to Slack.',
     documentationUrl: 'https://docs.getunleash.io/docs/addons/slack',
+    deprecated:
+        'This integration is deprecated. Please try the new Slack App integration instead.',
+    alerts: [
+        {
+            type: 'warning',
+            text: `This integration is deprecated. Please try the new Slack App integration instead.`,
+        },
+    ],
     parameters: [
         {
             name: 'url',
             displayName: 'Slack webhook URL',
+            description: '(Required)',
             type: 'url',
             required: true,
             sensitive: true,
@@ -53,10 +63,22 @@ const slackDefinition: IAddonDefinition = {
             name: 'defaultChannel',
             displayName: 'Default channel',
             description:
-                'Default channel to post updates to if not specified in the slack-tag',
+                '(Required) Default channel to post updates to if not specified in the slack-tag',
             type: 'text',
             required: true,
             sensitive: false,
+        },
+        {
+            name: 'customHeaders',
+            displayName: 'Extra HTTP Headers',
+            placeholder: `{
+  "ISTIO_USER_KEY": "hunter2",
+  "SOME_OTHER_CUSTOM_HTTP_HEADER": "SOMEVALUE"
+}`,
+            description: `(Optional) Used to add extra HTTP Headers to the request the plugin fires off. This must be a valid json object of key-value pairs where both the key and the value are strings`,
+            required: false,
+            sensitive: true,
+            type: 'textfield',
         },
     ],
     events: [
@@ -74,6 +96,7 @@ const slackDefinition: IAddonDefinition = {
         FEATURE_METADATA_UPDATED,
         FEATURE_VARIANTS_UPDATED,
         FEATURE_PROJECT_CHANGE,
+        FEATURE_POTENTIALLY_STALE_ON,
     ],
     tagTypes: [
         {

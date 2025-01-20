@@ -1,4 +1,4 @@
-import stoppable, { StoppableServer } from 'stoppable';
+import stoppable, { type StoppableServer } from 'stoppable';
 import { promisify } from 'util';
 import version from './util/version';
 import { migrateDb } from '../migrator';
@@ -7,24 +7,34 @@ import { createMetricsMonitor } from './metrics';
 import { createStores } from './db';
 import { createServices } from './services';
 import { createConfig } from './create-config';
-import { addEventHook } from './event-hook';
 import registerGracefulShutdown from './util/graceful-shutdown';
 import { createDb } from './db/db-pool';
 import sessionDb from './middleware/session-db';
 // Types
-import { IUnleash } from './types/core';
-import { IUnleashConfig, IUnleashOptions, IAuthType } from './types/option';
-import { IUnleashServices } from './types/services';
-import User, { IUser } from './types/user';
-import ApiUser from './types/api-user';
-import { Logger, LogLevel } from './logger';
+import {
+    type CustomAuthHandler,
+    IAuthType,
+    type IUnleash,
+    type IUnleashConfig,
+    type IUnleashOptions,
+    type IUnleashServices,
+    RoleName,
+} from './types';
+
+import User, { type IAuditUser, type IUser } from './types/user';
+import ApiUser, { type IApiUser } from './types/api-user';
+import { type Logger, LogLevel } from './logger';
 import AuthenticationRequired from './types/authentication-required';
 import Controller from './routes/controller';
-import { IAuthRequest } from './routes/unleash-types';
+import type { IApiRequest, IAuthRequest } from './routes/unleash-types';
+import type { SimpleAuthSettings } from './types/settings/simple-auth-settings';
+import { Knex } from 'knex';
 import * as permissions from './types/permissions';
 import * as eventType from './types/events';
-import { RoleName } from './types/model';
-import { SimpleAuthSettings } from './types/settings/simple-auth-settings';
+import { Db } from './db/db';
+import { defaultLockKey, defaultTimeout, withDbLock } from './util/db-lock';
+import { scheduleServices } from './features/scheduler/schedule-services';
+import { compareAndLogPostgresVersion } from './util/postgres-version-checker';
 
 async function createApp(
     config: IUnleashConfig,
@@ -32,10 +42,15 @@ async function createApp(
 ): Promise<IUnleash> {
     // Database dependencies (stateful)
     const logger = config.getLogger('server-impl.js');
-    const serverVersion = version;
+    const serverVersion = config.enterpriseVersion ?? version;
     const db = createDb(config);
     const stores = createStores(config, db);
-    const services = createServices(stores, config);
+    await compareAndLogPostgresVersion(config, stores.settingStore);
+    const services = createServices(stores, config, db);
+
+    if (!config.disableScheduler) {
+        await scheduleServices(services, config);
+    }
 
     const metricsMonitor = createMetricsMonitor();
     const unleashSession = sessionDb(config, db);
@@ -46,27 +61,31 @@ async function createApp(
             const stopServer = promisify(server.stop);
             await stopServer();
         }
-        metricsMonitor.stopMonitoring();
-        stores.clientInstanceStore.destroy();
-        services.clientMetricsServiceV2.destroy();
+        if (typeof config.shutdownHook === 'function') {
+            try {
+                await config.shutdownHook();
+            } catch (e) {
+                logger.error('Failure when executing shutdown hook', e);
+            }
+        }
+        services.schedulerService.stop();
+        services.addonService.destroy();
         await db.destroy();
     };
 
     if (!config.server.secret) {
-        const secret = await stores.settingStore.get('unleash.secret');
-        // eslint-disable-next-line no-param-reassign
-        config.server.secret = secret;
+        const secret = await stores.settingStore.get<string>('unleash.secret');
+        config.server.secret = secret!;
     }
-    const app = await getApp(config, stores, services, unleashSession);
+    const app = await getApp(config, stores, services, unleashSession, db);
 
-    if (typeof config.eventHook === 'function') {
-        addEventHook(config.eventHook, stores.eventStore);
-    }
-    metricsMonitor.startMonitoring(
+    await metricsMonitor.startMonitoring(
         config,
         stores,
         serverVersion,
         config.eventBus,
+        services.instanceStatsService,
+        services.schedulerService,
         db,
     );
     const unleash: Omit<IUnleash, 'stop'> = {
@@ -79,15 +98,17 @@ async function createApp(
     };
 
     if (config.import.file) {
-        await services.stateService.importFile({
-            file: config.import.file,
-            dropBeforeImport: config.import.dropBeforeImport,
-            userName: 'import',
-            keepExisting: config.import.keepExisting,
-        });
+        await services.importService.importFromFile(
+            config.import.file,
+            config.import.project,
+            config.import.environment,
+        );
     }
 
-    if (config.environmentEnableOverrides?.length > 0) {
+    if (
+        config.environmentEnableOverrides &&
+        config.environmentEnableOverrides?.length > 0
+    ) {
         await services.environmentService.overrideEnabledProjects(
             config.environmentEnableOverrides,
         );
@@ -118,7 +139,6 @@ async function createApp(
     });
 }
 
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 async function start(opts: IUnleashOptions = {}): Promise<IUnleash> {
     const config = createConfig(opts);
     const logger = config.getLogger('server-impl.js');
@@ -127,9 +147,21 @@ async function start(opts: IUnleashOptions = {}): Promise<IUnleash> {
         if (config.db.disableMigration) {
             logger.info('DB migration: disabled');
         } else {
-            logger.debug('DB migration: start');
-            await migrateDb(config);
-            logger.debug('DB migration: end');
+            logger.info('DB migration: start');
+            if (config.flagResolver.isEnabled('migrationLock')) {
+                logger.info('Running migration with lock');
+                const lock = withDbLock(config.db, {
+                    lockKey: defaultLockKey,
+                    timeout: defaultTimeout,
+                    logger,
+                });
+                await lock(migrateDb)(config);
+            } else {
+                logger.info('Running migration without lock');
+                await migrateDb(config);
+            }
+
+            logger.info('DB migration: end');
         }
     } catch (err) {
         logger.error('Failed to migrate db', err);
@@ -143,7 +175,6 @@ async function start(opts: IUnleashOptions = {}): Promise<IUnleash> {
     return unleash;
 }
 
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 async function create(opts: IUnleashOptions): Promise<IUnleash> {
     const config = createConfig(opts);
     const logger = config.getLogger('server-impl.js');
@@ -161,12 +192,14 @@ async function create(opts: IUnleashOptions): Promise<IUnleash> {
     return createApp(config, false);
 }
 
-// Module exports
+export default {
+    start,
+    create,
+};
+
 export {
     start,
     create,
-    permissions,
-    eventType,
     Controller,
     AuthenticationRequired,
     User,
@@ -174,11 +207,10 @@ export {
     LogLevel,
     RoleName,
     IAuthType,
-};
-
-export default {
-    start,
-    create,
+    Knex,
+    Db,
+    permissions,
+    eventType,
 };
 
 export type {
@@ -187,7 +219,11 @@ export type {
     IUnleashOptions,
     IUnleashConfig,
     IUser,
+    IApiUser,
+    IAuditUser,
     IUnleashServices,
     IAuthRequest,
+    IApiRequest,
     SimpleAuthSettings,
+    CustomAuthHandler,
 };

@@ -1,14 +1,30 @@
-import { IUnleashTest, setupApp } from '../../helpers/test-helper';
-import dbInit, { ITestDb } from '../../helpers/database-init';
+import {
+    type IUnleashTest,
+    setupAppWithCustomConfig,
+} from '../../helpers/test-helper';
+import dbInit, { type ITestDb } from '../../helpers/database-init';
 import getLogger from '../../../fixtures/no-logger';
 import { DEFAULT_ENV } from '../../../../lib/util/constants';
+import type User from '../../../../lib/types/user';
+import { SYSTEM_USER_AUDIT, TEST_AUDIT_USER } from '../../../../lib/types';
 
 let app: IUnleashTest;
 let db: ITestDb;
+const testUser = { name: 'test', id: -9999 } as User;
 
 beforeAll(async () => {
     db = await dbInit('feature_api_client', getLogger);
-    app = await setupApp(db.stores);
+    app = await setupAppWithCustomConfig(
+        db.stores,
+        {
+            experimental: {
+                flags: {
+                    strictSchemaValidation: true,
+                },
+            },
+        },
+        db.rawDatabase,
+    );
     await app.services.featureToggleServiceV2.createFeatureToggle(
         'default',
         {
@@ -16,7 +32,7 @@ beforeAll(async () => {
             description: 'the #1 feature',
             impressionData: true,
         },
-        'test',
+        TEST_AUDIT_USER,
     );
     await app.services.featureToggleServiceV2.createFeatureToggle(
         'default',
@@ -24,15 +40,16 @@ beforeAll(async () => {
             name: 'featureY',
             description: 'soon to be the #1 feature',
         },
-        'test',
+        TEST_AUDIT_USER,
     );
+
     await app.services.featureToggleServiceV2.createFeatureToggle(
         'default',
         {
             name: 'featureZ',
             description: 'terrible feature',
         },
-        'test',
+        TEST_AUDIT_USER,
     );
     await app.services.featureToggleServiceV2.createFeatureToggle(
         'default',
@@ -40,12 +57,19 @@ beforeAll(async () => {
             name: 'featureArchivedX',
             description: 'the #1 feature',
         },
-        'test',
+        TEST_AUDIT_USER,
+    );
+    // depend on enabled feature with variant
+    await app.services.dependentFeaturesService.unprotectedUpsertFeatureDependency(
+        { child: 'featureY', projectId: 'default' },
+        { feature: 'featureX', variants: ['featureXVariant'] },
+        TEST_AUDIT_USER,
     );
 
     await app.services.featureToggleServiceV2.archiveToggle(
         'featureArchivedX',
-        'test',
+        testUser,
+        TEST_AUDIT_USER,
     );
 
     await app.services.featureToggleServiceV2.createFeatureToggle(
@@ -54,12 +78,13 @@ beforeAll(async () => {
             name: 'featureArchivedY',
             description: 'soon to be the #1 feature',
         },
-        'test',
+        TEST_AUDIT_USER,
     );
 
     await app.services.featureToggleServiceV2.archiveToggle(
         'featureArchivedY',
-        'test',
+        testUser,
+        TEST_AUDIT_USER,
     );
     await app.services.featureToggleServiceV2.createFeatureToggle(
         'default',
@@ -67,19 +92,20 @@ beforeAll(async () => {
             name: 'featureArchivedZ',
             description: 'terrible feature',
         },
-        'test',
+        TEST_AUDIT_USER,
     );
     await app.services.featureToggleServiceV2.archiveToggle(
         'featureArchivedZ',
-        'test',
+        testUser,
+        TEST_AUDIT_USER,
     );
     await app.services.featureToggleServiceV2.createFeatureToggle(
         'default',
         {
             name: 'feature.with.variants',
-            description: 'A feature toggle with variants',
+            description: 'A feature flag with variants',
         },
-        'test',
+        TEST_AUDIT_USER,
     );
     await app.services.featureToggleServiceV2.saveVariants(
         'feature.with.variants',
@@ -98,7 +124,7 @@ beforeAll(async () => {
                 stickiness: 'default',
             },
         ],
-        'ivar',
+        TEST_AUDIT_USER,
     );
 });
 
@@ -107,7 +133,7 @@ afterAll(async () => {
     await db.destroy();
 });
 
-test('returns four feature toggles', async () => {
+test('returns four feature flags', async () => {
     return app.request
         .get('/api/client/features')
         .expect('Content-Type', /json/)
@@ -117,7 +143,27 @@ test('returns four feature toggles', async () => {
         });
 });
 
-test('returns four feature toggles without createdAt', async () => {
+test('returns dependencies', async () => {
+    return app.request
+        .get('/api/client/features')
+        .expect('Content-Type', /json/)
+        .expect(200)
+        .expect((res) => {
+            expect(res.body.features[0]).toMatchObject({
+                name: 'featureY',
+                dependencies: [
+                    {
+                        feature: 'featureX',
+                        enabled: true,
+                        variants: ['featureXVariant'],
+                    },
+                ],
+            });
+            expect(res.body.features[1].dependencies).toBe(undefined);
+        });
+});
+
+test('returns four feature flags without createdAt', async () => {
     return app.request
         .get('/api/client/features')
         .expect('Content-Type', /json/)
@@ -135,7 +181,7 @@ test('gets a feature by name', async () => {
         .expect(200);
 });
 
-test('returns a feature toggles impression data', async () => {
+test('returns a feature flags impression data', async () => {
     return app.request
         .get('/api/client/features/featureX')
         .expect('Content-Type', /json/)
@@ -175,10 +221,10 @@ test('Can get strategies for specific environment', async () => {
     const featureName = 'test.feature.with.env';
     const env = DEFAULT_ENV;
 
-    // Create feature toggle
+    // Create feature flag
     await app.request.post('/api/admin/projects/default/features').send({
         name: featureName,
-        type: 'killswitch',
+        type: 'kill-switch',
     });
 
     // Add global strategy
@@ -201,6 +247,7 @@ test('Can get strategies for specific environment', async () => {
     await app.services.environmentService.addEnvironmentToProject(
         'testing',
         'default',
+        SYSTEM_USER_AUDIT,
     );
 
     await app.request
@@ -208,7 +255,7 @@ test('Can get strategies for specific environment', async () => {
             `/api/admin/projects/default/features/${featureName}/environments/testing/strategies`,
         )
         .send({
-            name: 'custom1',
+            name: 'default',
         })
         .expect(200);
 
@@ -220,7 +267,7 @@ test('Can get strategies for specific environment', async () => {
             expect(res.body.name).toBe(featureName);
             expect(res.body.strategies).toHaveLength(1);
             expect(
-                res.body.strategies.find((s) => s.name === 'custom1'),
+                res.body.strategies.find((s) => s.name === 'default'),
             ).toBeDefined();
         });
 });
@@ -228,19 +275,19 @@ test('Can get strategies for specific environment', async () => {
 test('Can use multiple filters', async () => {
     expect.assertions(3);
 
-    await app.request.post('/api/admin/features').send({
+    await app.request.post('/api/admin/projects/default/features').send({
         name: 'test.feature',
-        type: 'killswitch',
+        type: 'kill-switch',
         enabled: true,
         strategies: [{ name: 'default' }],
     });
-    await app.request.post('/api/admin/features').send({
+    await app.request.post('/api/admin/projects/default/features').send({
         name: 'test.feature2',
-        type: 'killswitch',
+        type: 'kill-switch',
         enabled: true,
         strategies: [{ name: 'default' }],
     });
-    await app.request.post('/api/admin/features').send({
+    await app.request.post('/api/admin/projects/default/features').send({
         name: 'notestprefix.feature3',
         type: 'release',
         enabled: true,
@@ -275,23 +322,24 @@ test('Can use multiple filters', async () => {
         });
 });
 
-test('returns a feature toggles impression data for a different project', async () => {
+test('returns a feature flags impression data for a different project', async () => {
     const project = {
         id: 'impression-data-client',
         name: 'ImpressionData',
         description: '',
+        mode: 'open' as const,
     };
 
     await db.stores.projectStore.create(project);
 
-    const toggle = {
+    const flag = {
         name: 'project-client.impression.data',
         impressionData: true,
     };
 
     await app.request
         .post('/api/admin/projects/impression-data-client/features')
-        .send(toggle)
+        .send(flag)
         .expect(201)
         .expect((res) => {
             expect(res.body.impressionData).toBe(true);
@@ -301,12 +349,34 @@ test('returns a feature toggles impression data for a different project', async 
         .get('/api/client/features')
         .expect('Content-Type', /json/)
         .expect((res) => {
-            const projectToggle = res.body.features.find(
-                (resToggle) => resToggle.project === project.id,
+            const projectFlag = res.body.features.find(
+                (resFlag) => resFlag.project === project.id,
             );
 
-            expect(projectToggle.name).toBe(toggle.name);
-            expect(projectToggle.project).toBe(project.id);
-            expect(projectToggle.impressionData).toBe(true);
+            expect(projectFlag.name).toBe(flag.name);
+            expect(projectFlag.project).toBe(project.id);
+            expect(projectFlag.impressionData).toBe(true);
         });
+});
+
+test('Can add tags while creating feature flag', async () => {
+    const featureName = 'test.feature.with.tagss';
+    const tags = [{ value: 'tag1', type: 'simple' }];
+
+    await app.request.post('/api/admin/tags').send(tags[0]);
+
+    await app.request.post('/api/admin/projects/default/features').send({
+        name: featureName,
+        type: 'kill-switch',
+        tags,
+    });
+
+    const { body } = await app.request
+        .get(`/api/admin/features/${featureName}/tags`)
+        .expect('Content-Type', /json/)
+        .expect(200);
+
+    expect(body).toMatchObject({
+        tags,
+    });
 });

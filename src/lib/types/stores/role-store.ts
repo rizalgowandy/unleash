@@ -1,6 +1,7 @@
-import { ICustomRole } from '../model';
-import { IRole, IUserRole } from './access-store';
-import { Store } from './store';
+import type { RoleSchema } from '../../openapi';
+import type { ICustomRole } from '../model';
+import type { IRole, IUserRole } from './access-store';
+import type { Store } from './store';
 
 export interface ICustomRoleInsert {
     name: string;
@@ -27,5 +28,8 @@ export interface IRoleStore extends Store<ICustomRole, number> {
     getProjectRoles(): Promise<IRole[]>;
     getRootRoles(): Promise<IRole[]>;
     getRootRoleForAllUsers(): Promise<IUserRole[]>;
-    nameInUse(name: string, existingId: number): Promise<boolean>;
+    nameInUse(name: string, existingId?: number): Promise<boolean>;
+    count(): Promise<number>;
+    filteredCount(filter: Partial<RoleSchema>): Promise<number>;
+    filteredCountInUse(filter: Partial<RoleSchema>): Promise<number>;
 }

@@ -1,9 +1,10 @@
-import { IFeatureTypeStore } from 'lib/types/stores/feature-type-store';
-import dbInit from '../helpers/database-init';
+import type { IFeatureTypeStore } from '../../../lib/types/stores/feature-type-store';
+import dbInit, { type ITestDb } from '../helpers/database-init';
 import getLogger from '../../fixtures/no-logger';
+import type { IUnleashStores } from '../../../lib/types';
 
-let stores;
-let db;
+let stores: IUnleashStores;
+let db: ITestDb;
 let featureTypeStore: IFeatureTypeStore;
 
 beforeAll(async () => {
@@ -28,14 +29,37 @@ test('should be possible to get by name', async () => {
 });
 
 test('should be possible to get by id', async () => {
-    const type = await featureTypeStore.exists(0);
-    expect(type).toBeDefined();
+    expect(await featureTypeStore.exists('unknown')).toEqual(false);
+    expect(await featureTypeStore.exists('operational')).toEqual(true);
 });
 
 test('should be possible to delete by id', async () => {
     const types = await featureTypeStore.getAll();
-    const deleteType = types.pop();
+    const deleteType = types.pop()!;
     await featureTypeStore.delete(deleteType.id);
     const typesAfterDelete = await featureTypeStore.getAll();
     expect(typesAfterDelete.length).toBe(4);
+});
+
+describe('update lifetimes', () => {
+    test.each([null, 5])('it sets lifetimeDays to %s', async (newLifetime) => {
+        const featureTypes = await featureTypeStore.getAll();
+
+        for (const type of featureTypes) {
+            const updated = await featureTypeStore.updateLifetime(
+                type.id,
+                newLifetime,
+            );
+
+            expect(updated?.lifetimeDays).toBe(newLifetime);
+
+            expect(updated).toMatchObject(await featureTypeStore.get(type.id));
+        }
+    });
+
+    test("It returns undefined if you try to update a feature type that doesn't exist", async () => {
+        expect(
+            await featureTypeStore.updateLifetime('bogus-type', 40),
+        ).toBeUndefined();
+    });
 });

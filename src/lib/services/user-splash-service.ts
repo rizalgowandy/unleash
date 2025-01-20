@@ -1,8 +1,8 @@
-import { Logger } from '../logger';
-import { IUnleashStores } from '../types/stores';
-import { IUnleashConfig } from '../types/option';
-import User from '../types/user';
-import {
+import type { Logger } from '../logger';
+import type { IUnleashStores } from '../types/stores';
+import type { IUnleashConfig } from '../types/option';
+import type { IUser } from '../types/user';
+import type {
     IUserSplash,
     IUserSplashStore,
 } from '../types/stores/user-splash-store';
@@ -20,13 +20,13 @@ export default class UserSplashService {
         this.logger = getLogger('services/user-splash-service.js');
     }
 
-    async getAllUserSplashs(user: User): Promise<Object> {
+    async getAllUserSplashes(user: IUser): Promise<Record<string, boolean>> {
         if (user.isAPI) {
-            return [];
+            return {};
         }
         try {
-            const splashs = (
-                await this.userSplashStore.getAllUserSplashs(user.id)
+            return (
+                await this.userSplashStore.getAllUserSplashes(user.id)
             ).reduce(
                 (splashObject, splash) => ({
                     ...splashObject,
@@ -34,10 +34,8 @@ export default class UserSplashService {
                 }),
                 {},
             );
-            return splashs;
         } catch (err) {
             this.logger.error(err);
-
             return {};
         }
     }

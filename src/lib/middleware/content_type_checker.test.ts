@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import requireContentType from './content_type_checker';
 
 const mockRequest: (contentType: string) => Request = (contentType) => ({
@@ -16,7 +16,10 @@ const returns415: (t: jest.Mock) => Response = (t) => ({
     status: (code) => {
         expect(415).toBe(code);
         return {
-            end: t,
+            json: () => ({
+                // @ts-ignore
+                end: t,
+            }),
         };
     },
 });
@@ -24,7 +27,11 @@ const returns415: (t: jest.Mock) => Response = (t) => ({
 const expectNoCall: (t: jest.Mock) => Response = (t) => ({
     // @ts-ignore
     status: () => ({
-        end: () => expect(t).toHaveBeenCalledTimes(0),
+        // @ts-ignore
+        json: () => ({
+            // @ts-ignore
+            end: () => expect(t).toHaveBeenCalledTimes(0),
+        }),
     }),
 });
 

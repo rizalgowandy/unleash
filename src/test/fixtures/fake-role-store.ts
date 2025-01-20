@@ -1,23 +1,51 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { ICustomRole } from 'lib/types/model';
-import { IRole, IUserRole } from 'lib/types/stores/access-store';
-import {
+import type { RoleSchema } from '../../lib/openapi';
+import type { ICustomRole } from '../../lib/types/model';
+import type { IRole, IUserRole } from '../../lib/types/stores/access-store';
+import type {
     ICustomRoleInsert,
     ICustomRoleUpdate,
     IRoleStore,
-} from 'lib/types/stores/role-store';
+} from '../../lib/types/stores/role-store';
 
 export default class FakeRoleStore implements IRoleStore {
-    nameInUse(name: string, existingId: number): Promise<boolean> {
+    count(): Promise<number> {
+        return Promise.resolve(0);
+    }
+
+    filteredCount(search: Partial<RoleSchema>): Promise<number> {
+        return Promise.resolve(0);
+    }
+
+    filteredCountInUse(search: Partial<RoleSchema>): Promise<number> {
+        return Promise.resolve(0);
+    }
+
+    roles: ICustomRole[] = [];
+
+    getGroupRolesForProject(projectId: string): Promise<IRole[]> {
         throw new Error('Method not implemented.');
     }
 
-    getAll(): Promise<ICustomRole[]> {
-        throw new Error('Method not implemented.');
+    nameInUse(name: string, existingId?: number): Promise<boolean> {
+        return Promise.resolve(
+            this.roles.find((r) => r.name === name) !== undefined,
+        );
     }
 
-    create(role: ICustomRoleInsert): Promise<ICustomRole> {
-        throw new Error('Method not implemented.');
+    async getAll(): Promise<ICustomRole[]> {
+        return this.roles;
+    }
+
+    async create(role: ICustomRoleInsert): Promise<ICustomRole> {
+        const roleCreated = {
+            ...role,
+            type: role.roleType,
+            id: this.roles.length,
+            roleType: undefined, // roleType is not part of ICustomRole and simulates what the DB responds
+        };
+        this.roles.push(roleCreated);
+        return Promise.resolve(roleCreated);
     }
 
     update(role: ICustomRoleUpdate): Promise<ICustomRole> {
@@ -32,8 +60,8 @@ export default class FakeRoleStore implements IRoleStore {
         throw new Error('Method not implemented.');
     }
 
-    getRoleByName(name: string): Promise<IRole> {
-        throw new Error('Method not implemented.');
+    async getRoleByName(name: string): Promise<IRole> {
+        return this.roles.find((r) => r.name === name) as IRole;
     }
 
     getRolesForProject(projectId: string): Promise<IRole[]> {
@@ -48,16 +76,21 @@ export default class FakeRoleStore implements IRoleStore {
         throw new Error('Method not implemented.');
     }
 
-    getRootRoles(): Promise<IRole[]> {
-        throw new Error('Method not implemented.');
+    async getRootRoles(): Promise<IRole[]> {
+        return this.roles;
     }
 
     getRootRoleForAllUsers(): Promise<IUserRole[]> {
         throw new Error('Method not implemented.');
     }
 
-    get(key: number): Promise<ICustomRole> {
-        throw new Error('Method not implemented.');
+    get(id: number): Promise<ICustomRole> {
+        const found = this.roles.find((r) => r.id === id);
+        if (!found) {
+            // this edge case is not properly contemplated in the type definition
+            throw new Error('Not found');
+        }
+        return Promise.resolve(found);
     }
 
     exists(key: number): Promise<boolean> {

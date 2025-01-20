@@ -1,4 +1,4 @@
-import {
+import type {
     IUserSplashKey,
     IUserSplash,
     IUserSplashStore,
@@ -6,7 +6,7 @@ import {
 
 export default class FakeUserSplashStore implements IUserSplashStore {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    getAllUserSplashs(userId: number): Promise<IUserSplash[]> {
+    getAllUserSplashes(userId: number): Promise<IUserSplash[]> {
         return Promise.resolve([]);
     }
 

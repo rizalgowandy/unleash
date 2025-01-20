@@ -1,4 +1,4 @@
-import { ISettingStore } from '../../lib/types/stores/settings-store';
+import type { ISettingStore } from '../../lib/types/stores/settings-store';
 
 export default class FakeSettingStore implements ISettingStore {
     settings: Map<string, any> = new Map();
@@ -37,5 +37,9 @@ export default class FakeSettingStore implements ISettingStore {
     // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
     async updateRow(name: string, content: any): Promise<void> {
         this.settings.set(name, content);
+    }
+
+    async postgresVersion(): Promise<string> {
+        return Promise.resolve('fake-postgres-version');
     }
 }

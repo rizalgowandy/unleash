@@ -1,15 +1,17 @@
-import { Knex } from 'knex';
-import { Logger, LogProvider } from '../logger';
+import type { Logger, LogProvider } from '../logger';
 
 import NotFoundError from '../error/notfound-error';
-import {
+import type {
     IEditableStrategy,
     IMinimalStrategyRow,
     IStrategy,
+    IStrategyImport,
     IStrategyStore,
 } from '../types/stores/strategy-store';
+import type { Db } from './db';
 
 const STRATEGY_COLUMNS = [
+    'title',
     'name',
     'description',
     'parameters',
@@ -20,6 +22,7 @@ const STRATEGY_COLUMNS = [
 const TABLE = 'strategies';
 
 interface IStrategyRow {
+    title: string;
     name: string;
     built_in: number;
     description: string;
@@ -28,11 +31,11 @@ interface IStrategyRow {
     display_name: string;
 }
 export default class StrategyStore implements IStrategyStore {
-    private db: Knex;
+    private db: Db;
 
     private logger: Logger;
 
-    constructor(db: Knex, getLogger: LogProvider) {
+    constructor(db: Db, getLogger: LogProvider) {
         this.db = db;
         this.logger = getLogger('strategy-store.ts');
     }
@@ -74,6 +77,13 @@ export default class StrategyStore implements IStrategyStore {
         await this.db(TABLE).del();
     }
 
+    async count(): Promise<number> {
+        return this.db
+            .from(TABLE)
+            .count('*')
+            .then((res) => Number(res[0].count));
+    }
+
     destroy(): void {}
 
     async exists(name: string): Promise<boolean> {
@@ -101,6 +111,7 @@ export default class StrategyStore implements IStrategyStore {
             description: row.description,
             parameters: row.parameters,
             deprecated: row.deprecated,
+            title: row.title,
         };
     }
 
@@ -113,6 +124,7 @@ export default class StrategyStore implements IStrategyStore {
             description: row.description,
             parameters: row.parameters,
             deprecated: row.deprecated,
+            title: row.title,
         };
     }
 
@@ -122,6 +134,7 @@ export default class StrategyStore implements IStrategyStore {
             name: data.name,
             description: data.description,
             parameters: JSON.stringify(data.parameters),
+            title: data.title,
         };
     }
 
@@ -149,9 +162,17 @@ export default class StrategyStore implements IStrategyStore {
         await this.db(TABLE).where({ name }).del();
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    async importStrategy(data): Promise<void> {
-        const rowData = this.eventDataToRow(data);
+    async importStrategy(data: IStrategyImport): Promise<void> {
+        const rowData = {
+            name: data.name,
+            description: data.description,
+            deprecated: data.deprecated || false,
+            parameters: JSON.stringify(data.parameters || []),
+            built_in: data.builtIn ? 1 : 0,
+            sort_order: data.sortOrder || 9999,
+            display_name: data.displayName,
+            title: data.title,
+        };
         await this.db(TABLE).insert(rowData).onConflict(['name']).merge();
     }
 

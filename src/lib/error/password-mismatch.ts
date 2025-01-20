@@ -1,9 +1,10 @@
-import BaseError from './base-error';
+import { UnleashError } from './unleash-error';
 
-class PasswordMismatch extends BaseError {
+class PasswordMismatch extends UnleashError {
+    statusCode = 401;
+
     constructor(message: string = 'Wrong password, try again.') {
-        super(message, 401, 'PasswordMismatch');
-        Error.captureStackTrace(this, this.constructor);
+        super(message);
     }
 }
 

@@ -1,17 +1,37 @@
-import { IUnleashConfig } from '../../types/option';
-import { IUnleashServices } from '../../types/services';
-import StrategyService from '../../services/strategy-service';
-import { Logger } from '../../logger';
-
+import type { IUnleashConfig } from '../../types/option';
+import type { IUnleashServices } from '../../types/services';
+import type StrategyService from '../../services/strategy-service';
+import type { Logger } from '../../logger';
 import Controller from '../controller';
-
 import { extractUsername } from '../../util/extract-user';
-import { handleErrors } from '../util';
 import {
-    DELETE_STRATEGY,
     CREATE_STRATEGY,
+    DELETE_STRATEGY,
+    NONE,
     UPDATE_STRATEGY,
 } from '../../types/permissions';
+import type { Request, Response } from 'express';
+import type { IAuthRequest } from '../unleash-types';
+import type { OpenApiService } from '../../services/openapi-service';
+import {
+    emptyResponse,
+    getStandardResponses,
+} from '../../openapi/util/standard-responses';
+import { createRequestSchema } from '../../openapi/util/create-request-schema';
+import {
+    createResponseSchema,
+    resourceCreatedResponseSchema,
+} from '../../openapi/util/create-response-schema';
+import {
+    strategySchema,
+    type StrategySchema,
+} from '../../openapi/spec/strategy-schema';
+import {
+    strategiesSchema,
+    type StrategiesSchema,
+} from '../../openapi/spec/strategies-schema';
+import type { CreateStrategySchema } from '../../openapi/spec/create-strategy-schema';
+import type { UpdateStrategySchema } from '../../openapi/spec/update-strategy-schema';
 
 const version = 1;
 
@@ -20,119 +40,257 @@ class StrategyController extends Controller {
 
     private strategyService: StrategyService;
 
+    private openApiService: OpenApiService;
+
     constructor(
         config: IUnleashConfig,
-        { strategyService }: Pick<IUnleashServices, 'strategyService'>,
+        {
+            strategyService,
+            openApiService,
+        }: Pick<IUnleashServices, 'strategyService' | 'openApiService'>,
     ) {
         super(config);
         this.logger = config.getLogger('/admin-api/strategy.js');
         this.strategyService = strategyService;
+        this.openApiService = openApiService;
 
-        this.get('/', this.getAllStrategies);
-        this.get('/:name', this.getStrategy);
-        this.delete('/:name', this.removeStrategy, DELETE_STRATEGY);
-        this.post('/', this.createStrategy, CREATE_STRATEGY);
-        this.put('/:strategyName', this.updateStrategy, UPDATE_STRATEGY);
-        this.post(
-            '/:strategyName/deprecate',
-            this.deprecateStrategy,
-            UPDATE_STRATEGY,
+        this.route({
+            method: 'get',
+            path: '',
+            handler: this.getAllStrategies,
+            permission: NONE,
+            middleware: [
+                openApiService.validPath({
+                    summary: 'Get all strategies',
+                    description:
+                        'Retrieves all strategy types ([predefined](https://docs.getunleash.io/reference/activation-strategies "predefined strategies") and [custom strategies](https://docs.getunleash.io/reference/custom-activation-strategies)) that are defined on this Unleash instance.',
+                    tags: ['Strategies'],
+                    operationId: 'getAllStrategies',
+                    responses: {
+                        200: createResponseSchema('strategiesSchema'),
+                        ...getStandardResponses(401),
+                    },
+                }),
+            ],
+        });
+
+        this.route({
+            method: 'get',
+            path: '/:name',
+            handler: this.getStrategy,
+            permission: NONE,
+            middleware: [
+                openApiService.validPath({
+                    summary: 'Get a strategy definition',
+                    description:
+                        'Retrieves the definition of the strategy specified in the URL',
+
+                    tags: ['Strategies'],
+                    operationId: 'getStrategy',
+                    responses: {
+                        200: createResponseSchema('strategySchema'),
+                        ...getStandardResponses(401, 404),
+                    },
+                }),
+            ],
+        });
+
+        this.route({
+            method: 'delete',
+            path: '/:name',
+            handler: this.removeStrategy,
+            permission: DELETE_STRATEGY,
+            acceptAnyContentType: true,
+            middleware: [
+                openApiService.validPath({
+                    summary: 'Delete a strategy',
+                    description: 'Deletes the specified strategy definition',
+                    tags: ['Strategies'],
+                    operationId: 'removeStrategy',
+                    responses: {
+                        200: emptyResponse,
+                        ...getStandardResponses(401, 403, 404),
+                    },
+                }),
+            ],
+        });
+
+        this.route({
+            method: 'post',
+            path: '',
+            handler: this.createStrategy,
+            permission: CREATE_STRATEGY,
+            middleware: [
+                openApiService.validPath({
+                    deprecated: true,
+                    tags: ['Strategies'],
+                    operationId: 'createStrategy',
+                    summary: 'Create a strategy',
+                    description:
+                        'Creates a custom strategy type based on the supplied data. Custom strategies are deprecated and should not be used. Prefer using built in strategies with constraints instead.',
+                    requestBody: createRequestSchema('createStrategySchema'),
+                    responses: {
+                        201: resourceCreatedResponseSchema('strategySchema'),
+                        ...getStandardResponses(401, 403, 409, 415),
+                    },
+                }),
+            ],
+        });
+
+        this.route({
+            method: 'put',
+            path: '/:name',
+            handler: this.updateStrategy,
+            permission: UPDATE_STRATEGY,
+            middleware: [
+                openApiService.validPath({
+                    tags: ['Strategies'],
+                    summary: 'Update a strategy type',
+                    description:
+                        'Updates the specified strategy type. Any properties not specified in the request body are left untouched.',
+                    operationId: 'updateStrategy',
+                    requestBody: createRequestSchema('updateStrategySchema'),
+                    responses: {
+                        200: emptyResponse,
+                        ...getStandardResponses(401, 403, 404, 415),
+                    },
+                }),
+            ],
+        });
+
+        this.route({
+            method: 'post',
+            path: '/:strategyName/deprecate',
+            handler: this.deprecateStrategy,
+            permission: UPDATE_STRATEGY,
+            acceptAnyContentType: true,
+            middleware: [
+                openApiService.validPath({
+                    tags: ['Strategies'],
+                    summary: 'Deprecate a strategy',
+                    description: 'Marks the specified strategy as deprecated.',
+                    operationId: 'deprecateStrategy',
+                    responses: {
+                        200: emptyResponse,
+                        ...getStandardResponses(401, 403, 404),
+                    },
+                }),
+            ],
+        });
+
+        this.route({
+            method: 'post',
+            path: '/:strategyName/reactivate',
+            handler: this.reactivateStrategy,
+            permission: UPDATE_STRATEGY,
+            acceptAnyContentType: true,
+            middleware: [
+                openApiService.validPath({
+                    tags: ['Strategies'],
+                    operationId: 'reactivateStrategy',
+                    summary: 'Reactivate a strategy',
+                    description:
+                        "Marks the specified strategy as not deprecated. If the strategy wasn't already deprecated, nothing changes.",
+                    responses: {
+                        200: emptyResponse,
+                        ...getStandardResponses(401, 403, 404),
+                    },
+                }),
+            ],
+        });
+    }
+
+    async getAllStrategies(
+        req: Request,
+        res: Response<StrategiesSchema>,
+    ): Promise<void> {
+        const strategies = await this.strategyService.getStrategies();
+
+        this.openApiService.respondWithValidation(
+            200,
+            res,
+            strategiesSchema.$id,
+            { version, strategies },
         );
-        this.post(
-            '/:strategyName/reactivate',
-            this.reactivateStrategy,
-            UPDATE_STRATEGY,
+    }
+
+    async getStrategy(
+        req: Request,
+        res: Response<StrategySchema>,
+    ): Promise<void> {
+        const strategy = await this.strategyService.getStrategy(
+            req.params.name,
+        );
+
+        this.openApiService.respondWithValidation(
+            200,
+            res,
+            strategySchema.$id,
+            strategy,
         );
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    async getAllStrategies(req, res): Promise<void> {
-        try {
-            const strategies = await this.strategyService.getStrategies();
-            res.json({ version, strategies });
-        } catch (err) {
-            handleErrors(res, this.logger, err);
-        }
-    }
-
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    async getStrategy(req, res): Promise<void> {
-        try {
-            const { name } = req.params;
-            const strategy = await this.strategyService.getStrategy(name);
-            res.json(strategy).end();
-        } catch (err) {
-            res.status(404).json({ error: 'Could not find strategy' });
-        }
-    }
-
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    async removeStrategy(req, res): Promise<void> {
+    async removeStrategy(req: IAuthRequest, res: Response): Promise<void> {
         const strategyName = req.params.name;
         const userName = extractUsername(req);
 
-        try {
-            await this.strategyService.removeStrategy(strategyName, userName);
-            res.status(200).end();
-        } catch (error) {
-            handleErrors(res, this.logger, error);
-        }
+        await this.strategyService.removeStrategy(strategyName, req.audit);
+        res.status(200).end();
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    async createStrategy(req, res): Promise<void> {
+    async createStrategy(
+        req: IAuthRequest<unknown, unknown, CreateStrategySchema>,
+        res: Response<StrategySchema>,
+    ): Promise<void> {
         const userName = extractUsername(req);
-        try {
-            await this.strategyService.createStrategy(req.body, userName);
-            res.status(201).end();
-        } catch (error) {
-            handleErrors(res, this.logger, error);
-        }
+
+        const strategy = await this.strategyService.createStrategy(
+            req.body,
+            req.audit,
+        );
+        this.openApiService.respondWithValidation(
+            201,
+            res,
+            strategySchema.$id,
+            strategy,
+            { location: `strategies/${strategy.name}` },
+        );
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    async updateStrategy(req, res): Promise<void> {
+    async updateStrategy(
+        req: IAuthRequest<{ name: string }, UpdateStrategySchema>,
+        res: Response<void>,
+    ): Promise<void> {
         const userName = extractUsername(req);
-        try {
-            await this.strategyService.updateStrategy(req.body, userName);
-            res.status(200).end();
-        } catch (error) {
-            handleErrors(res, this.logger, error);
-        }
+
+        await this.strategyService.updateStrategy(
+            { ...req.body, name: req.params.name },
+            req.audit,
+        );
+        res.status(200).end();
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    async deprecateStrategy(req, res): Promise<void> {
-        const userName = extractUsername(req);
-        const { strategyName } = req.params;
-        if (strategyName === 'default') {
-            res.status(403).end();
-        } else {
-            try {
-                await this.strategyService.deprecateStrategy(
-                    strategyName,
-                    userName,
-                );
-                res.status(200).end();
-            } catch (error) {
-                handleErrors(res, this.logger, error);
-            }
-        }
-    }
-
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-    async reactivateStrategy(req, res): Promise<void> {
+    async deprecateStrategy(
+        req: IAuthRequest,
+        res: Response<void>,
+    ): Promise<void> {
         const userName = extractUsername(req);
         const { strategyName } = req.params;
-        try {
-            await this.strategyService.reactivateStrategy(
-                strategyName,
-                userName,
-            );
-            res.status(200).end();
-        } catch (error) {
-            handleErrors(res, this.logger, error);
-        }
+
+        await this.strategyService.deprecateStrategy(strategyName, req.audit);
+        res.status(200).end();
+    }
+
+    async reactivateStrategy(
+        req: IAuthRequest,
+        res: Response<void>,
+    ): Promise<void> {
+        const userName = extractUsername(req);
+        const { strategyName } = req.params;
+
+        await this.strategyService.reactivateStrategy(strategyName, req.audit);
+        res.status(200).end();
     }
 }
+
 export default StrategyController;

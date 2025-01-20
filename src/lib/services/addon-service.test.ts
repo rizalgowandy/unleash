@@ -1,7 +1,7 @@
 import { ValidationError } from 'joi';
 
 import getLogger from '../../test/fixtures/no-logger';
-import TagTypeService from './tag-type-service';
+import TagTypeService from '../features/tag-type/tag-type-service';
 import {
     ADDON_CONFIG_CREATED,
     ADDON_CONFIG_DELETED,
@@ -11,17 +11,43 @@ import {
 import createStores from '../../test/fixtures/store';
 
 import AddonService from './addon-service';
-import { IAddonDto } from '../types/stores/addon-store';
+import type { IAddonDto } from '../types/stores/addon-store';
 import SimpleAddon from './addon-service-test-simple-addon';
+import type { IAddonProviders } from '../addons';
+import {
+    type IFlagResolver,
+    type IUnleashConfig,
+    SYSTEM_USER,
+    TEST_AUDIT_USER,
+} from '../types';
+import {
+    createFakeEventsService,
+    IntegrationEventsService,
+} from '../internals';
+import { createTestConfig } from '../../test/config/test-config';
 
 const MASKED_VALUE = '*****';
 
-const addonProvider = { simple: new SimpleAddon() };
+const TEST_USER_ID = -9999;
+
+let addonProvider: IAddonProviders;
+
+const config: IUnleashConfig = createTestConfig();
 
 function getSetup() {
     const stores = createStores();
-    const tagTypeService = new TagTypeService(stores, { getLogger });
+    const eventService = createFakeEventsService(config);
+    const tagTypeService = new TagTypeService(
+        stores,
+        { getLogger },
+        eventService,
+    );
+    const integrationEventsService = new IntegrationEventsService(stores, {
+        getLogger,
+        flagResolver: {} as IFlagResolver,
+    });
 
+    addonProvider = { simple: new SimpleAddon() };
     return {
         addonService: new AddonService(
             stores,
@@ -31,8 +57,11 @@ function getSetup() {
                 server: { unleashUrl: 'http://test' },
             },
             tagTypeService,
+            eventService,
+            integrationEventsService,
             addonProvider,
         ),
+        eventService,
         stores,
         tagTypeService,
     };
@@ -49,12 +78,12 @@ test('should load addon configurations', async () => {
 test('should load provider definitions', async () => {
     const { addonService } = getSetup();
 
-    const providerDefinitions = await addonService.getProviderDefinitions();
+    const providerDefinitions = addonService.getProviderDefinitions();
 
     const simple = providerDefinitions.find((p) => p.name === 'simple');
 
     expect(providerDefinitions.length).toBe(1);
-    expect(simple.name).toBe('simple');
+    expect(simple!.name).toBe('simple');
 });
 
 test('should not allow addon-config for unknown provider', async () => {
@@ -69,13 +98,13 @@ test('should not allow addon-config for unknown provider', async () => {
                 events: [],
                 description: '',
             },
-            'test',
+            TEST_AUDIT_USER,
         );
-    }).rejects.toThrow(new TypeError('Unknown addon provider unknown'));
+    }).rejects.toThrow(ValidationError);
 });
 
 test('should trigger simple-addon eventHandler', async () => {
-    const { addonService, stores } = getSetup();
+    const { addonService, eventService } = getSetup();
 
     const config = {
         provider: 'simple',
@@ -88,17 +117,19 @@ test('should trigger simple-addon eventHandler', async () => {
         description: '',
     };
 
-    await addonService.createAddon(config, 'me@mail.com');
+    await addonService.createAddon(config, TEST_AUDIT_USER);
 
-    // Feature toggle was created
-    await stores.eventStore.store({
+    // Feature flag was created
+    await eventService.storeEvent({
         type: FEATURE_CREATED,
-        createdBy: 'some@user.com',
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
         data: {
             name: 'some-toggle',
             enabled: false,
             strategies: [{ name: 'default' }],
         },
+        ip: '127.0.0.1',
     });
 
     const simpleProvider = addonService.addonProviders.simple;
@@ -108,6 +139,444 @@ test('should trigger simple-addon eventHandler', async () => {
     expect(events.length).toBe(1);
     expect(events[0].event.type).toBe(FEATURE_CREATED);
     expect(events[0].event.data.name).toBe('some-toggle');
+});
+
+test('should not trigger event handler if project of event is different from addon', async () => {
+    const { addonService, eventService } = getSetup();
+    const config = {
+        provider: 'simple',
+        enabled: true,
+        events: [FEATURE_CREATED],
+        projects: ['someproject'],
+        description: '',
+        parameters: {
+            url: 'http://localhost:wh',
+        },
+    };
+
+    await addonService.createAddon(config, TEST_AUDIT_USER);
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: 'someotherproject',
+        data: {
+            name: 'some-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    const simpleProvider = addonService.addonProviders.simple;
+    // @ts-expect-error
+    const events = simpleProvider.getEvents();
+
+    expect(events.length).toBe(0);
+});
+
+test('should trigger event handler if project for event is one of the desired projects for addon', async () => {
+    const { addonService, eventService } = getSetup();
+    const desiredProject = 'desired';
+    const otherProject = 'other';
+    const config = {
+        provider: 'simple',
+        enabled: true,
+        events: [FEATURE_CREATED],
+        projects: [desiredProject],
+        description: '',
+        parameters: {
+            url: 'http://localhost:wh',
+        },
+    };
+
+    await addonService.createAddon(config, TEST_AUDIT_USER);
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: desiredProject,
+        data: {
+            name: 'some-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: otherProject,
+        data: {
+            name: 'other-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    const simpleProvider = addonService.addonProviders.simple;
+    // @ts-expect-error
+    const events = simpleProvider.getEvents();
+
+    expect(events.length).toBe(1);
+    expect(events[0].event.type).toBe(FEATURE_CREATED);
+    expect(events[0].event.data.name).toBe('some-toggle');
+});
+
+test('should trigger events for multiple projects if addon is setup to filter multiple projects', async () => {
+    const { addonService, eventService } = getSetup();
+    const desiredProjects = ['desired', 'desired2'];
+    const otherProject = 'other';
+    const config = {
+        provider: 'simple',
+        enabled: true,
+        events: [FEATURE_CREATED],
+        projects: desiredProjects,
+        description: '',
+        parameters: {
+            url: 'http://localhost:wh',
+        },
+    };
+
+    await addonService.createAddon(config, TEST_AUDIT_USER);
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: desiredProjects[0],
+        data: {
+            name: 'some-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: otherProject,
+        data: {
+            name: 'other-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: desiredProjects[1],
+        data: {
+            name: 'third-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    const simpleProvider = addonService.addonProviders.simple;
+    // @ts-expect-error
+    const events = simpleProvider.getEvents();
+
+    expect(events.length).toBe(2);
+    expect(events[0].event.type).toBe(FEATURE_CREATED);
+    expect(events[0].event.data.name).toBe('some-toggle');
+    expect(events[1].event.type).toBe(FEATURE_CREATED);
+    expect(events[1].event.data.name).toBe('third-toggle');
+});
+
+test('should filter events on environment if addon is setup to filter for it', async () => {
+    const { addonService, eventService } = getSetup();
+    const desiredEnvironment = 'desired';
+    const otherEnvironment = 'other';
+    const config = {
+        provider: 'simple',
+        enabled: true,
+        events: [FEATURE_CREATED],
+        projects: [],
+        environments: [desiredEnvironment],
+        description: '',
+        parameters: {
+            url: 'http://localhost:wh',
+        },
+    };
+
+    await addonService.createAddon(config, TEST_AUDIT_USER);
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: desiredEnvironment,
+        environment: desiredEnvironment,
+        data: {
+            name: 'some-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        environment: otherEnvironment,
+        data: {
+            name: 'other-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    const simpleProvider = addonService.addonProviders.simple;
+    // @ts-expect-error
+    const events = simpleProvider.getEvents();
+
+    expect(events.length).toBe(1);
+    expect(events[0].event.type).toBe(FEATURE_CREATED);
+    expect(events[0].event.data.name).toBe('some-toggle');
+});
+
+test('should not filter out global events (no specific environment) even if addon is setup to filter for environments', async () => {
+    const { addonService, eventService } = getSetup();
+    const filteredEnvironment = 'filtered';
+    const config = {
+        provider: 'simple',
+        enabled: true,
+        events: [FEATURE_CREATED],
+        projects: [],
+        environments: [filteredEnvironment],
+        description: '',
+        parameters: {
+            url: 'http://localhost:wh',
+        },
+    };
+
+    const globalEventWithNoEnvironment = {
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: 'some-project',
+        data: {
+            name: 'some-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    };
+
+    await addonService.createAddon(config, TEST_AUDIT_USER);
+    await eventService.storeEvent(globalEventWithNoEnvironment);
+    const simpleProvider = addonService.addonProviders.simple;
+    // @ts-expect-error
+    const events = simpleProvider.getEvents();
+
+    expect(events.length).toBe(1);
+    expect(events[0].event.type).toBe(FEATURE_CREATED);
+    expect(events[0].event.data.name).toBe('some-toggle');
+});
+
+test('should not filter out global events (no specific project) even if addon is setup to filter for projects', async () => {
+    const { addonService, eventService } = getSetup();
+    const filteredProject = 'filtered';
+    const config = {
+        provider: 'simple',
+        enabled: true,
+        events: [FEATURE_CREATED],
+        projects: [filteredProject],
+        environments: [],
+        description: '',
+        parameters: {
+            url: 'http://localhost:wh',
+        },
+    };
+
+    const globalEventWithNoProject = {
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        data: {
+            name: 'some-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    };
+
+    await addonService.createAddon(config, TEST_AUDIT_USER);
+    await eventService.storeEvent(globalEventWithNoProject);
+    const simpleProvider = addonService.addonProviders.simple;
+    // @ts-expect-error
+    const events = simpleProvider.getEvents();
+
+    expect(events.length).toBe(1);
+    expect(events[0].event.type).toBe(FEATURE_CREATED);
+    expect(events[0].event.data.name).toBe('some-toggle');
+});
+
+test('should support wildcard option for filtering addons', async () => {
+    const { addonService, eventService } = getSetup();
+    const desiredProjects = ['desired', 'desired2'];
+    const otherProject = 'other';
+    const config = {
+        provider: 'simple',
+        enabled: true,
+        events: [FEATURE_CREATED],
+        projects: ['*'],
+        description: '',
+        parameters: {
+            url: 'http://localhost:wh',
+        },
+    };
+
+    await addonService.createAddon(config, TEST_AUDIT_USER);
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: desiredProjects[0],
+        data: {
+            name: 'some-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: otherProject,
+        data: {
+            name: 'other-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: desiredProjects[1],
+        data: {
+            name: 'third-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    const simpleProvider = addonService.addonProviders.simple;
+    // @ts-expect-error
+    const events = simpleProvider.getEvents();
+
+    expect(events).toHaveLength(3);
+    expect(events[0].event.type).toBe(FEATURE_CREATED);
+    expect(events[0].event.data.name).toBe('some-toggle');
+    expect(events[1].event.type).toBe(FEATURE_CREATED);
+    expect(events[1].event.data.name).toBe('other-toggle');
+    expect(events[2].event.type).toBe(FEATURE_CREATED);
+    expect(events[2].event.data.name).toBe('third-toggle');
+});
+
+test('Should support filtering by both project and environment', async () => {
+    const { addonService, eventService } = getSetup();
+    const desiredProjects = ['desired1', 'desired2', 'desired3'];
+    const desiredEnvironments = ['env1', 'env2', 'env3'];
+    const config = {
+        provider: 'simple',
+        enabled: true,
+        events: [FEATURE_CREATED],
+        projects: desiredProjects,
+        environments: desiredEnvironments,
+        description: '',
+        parameters: {
+            url: 'http://localhost:wh',
+        },
+    };
+    const expectedFeatureNames = [
+        'desired-toggle1',
+        'desired-toggle2',
+        'desired-toggle3',
+    ];
+    await addonService.createAddon(config, TEST_AUDIT_USER);
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: desiredProjects[0],
+        environment: desiredEnvironments[0],
+        data: {
+            name: expectedFeatureNames[0],
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: desiredProjects[0],
+        environment: 'wrongenvironment',
+        data: {
+            name: 'other-toggle',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: desiredProjects[2],
+        environment: desiredEnvironments[1],
+        data: {
+            name: expectedFeatureNames[1],
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: desiredProjects[2],
+        environment: desiredEnvironments[2],
+        data: {
+            name: expectedFeatureNames[2],
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+    await eventService.storeEvent({
+        type: FEATURE_CREATED,
+        createdBy: SYSTEM_USER.username!,
+        createdByUserId: SYSTEM_USER.id,
+        project: 'wrongproject',
+        environment: desiredEnvironments[0],
+        data: {
+            name: 'not-expected',
+            enabled: false,
+            strategies: [{ name: 'default' }],
+        },
+        ip: '127.0.0.1',
+    });
+
+    const simpleProvider = addonService.addonProviders.simple;
+    // @ts-expect-error
+    const events = simpleProvider.getEvents();
+
+    expect(events.length).toBe(3);
+    expect(events[0].event.type).toBe(FEATURE_CREATED);
+    expect(events[0].event.data.name).toBe(expectedFeatureNames[0]);
+    expect(events[1].event.type).toBe(FEATURE_CREATED);
+    expect(events[1].event.data.name).toBe(expectedFeatureNames[1]);
+    expect(events[2].event.type).toBe(FEATURE_CREATED);
+    expect(events[2].event.data.name).toBe(expectedFeatureNames[2]);
 });
 
 test('should create simple-addon config', async () => {
@@ -124,7 +593,7 @@ test('should create simple-addon config', async () => {
         description: '',
     };
 
-    await addonService.createAddon(config, 'me@mail.com');
+    await addonService.createAddon(config, TEST_AUDIT_USER);
     const addons = await addonService.getAddons();
 
     expect(addons.length).toBe(1);
@@ -145,14 +614,14 @@ test('should create tag type for simple-addon', async () => {
         description: '',
     };
 
-    await addonService.createAddon(config, 'me@mail.com');
+    await addonService.createAddon(config, TEST_AUDIT_USER);
     const tagType = await tagTypeService.getTagType('me');
 
     expect(tagType.name).toBe('me');
 });
 
 test('should store ADDON_CONFIG_CREATE event', async () => {
-    const { addonService, stores } = getSetup();
+    const { addonService, eventService } = getSetup();
 
     const config = {
         provider: 'simple',
@@ -165,9 +634,9 @@ test('should store ADDON_CONFIG_CREATE event', async () => {
         description: '',
     };
 
-    await addonService.createAddon(config, 'me@mail.com');
+    await addonService.createAddon(config, TEST_AUDIT_USER);
 
-    const events = await stores.eventStore.getEvents();
+    const { events } = await eventService.getEvents();
 
     expect(events.length).toBe(2); // Also tag-types where created
     expect(events[1].type).toBe(ADDON_CONFIG_CREATED);
@@ -175,7 +644,7 @@ test('should store ADDON_CONFIG_CREATE event', async () => {
 });
 
 test('should store ADDON_CONFIG_UPDATE event', async () => {
-    const { addonService, stores } = getSetup();
+    const { addonService, eventService } = getSetup();
 
     const config: IAddonDto = {
         description: '',
@@ -188,12 +657,12 @@ test('should store ADDON_CONFIG_UPDATE event', async () => {
         events: [FEATURE_CREATED],
     };
 
-    const addonConfig = await addonService.createAddon(config, 'me@mail.com');
+    const addonConfig = await addonService.createAddon(config, TEST_AUDIT_USER);
 
     const updated = { ...addonConfig, description: 'test' };
-    await addonService.updateAddon(addonConfig.id, updated, 'me@mail.com');
+    await addonService.updateAddon(addonConfig.id, updated, TEST_AUDIT_USER);
 
-    const events = await stores.eventStore.getEvents();
+    const { events } = await eventService.getEvents();
 
     expect(events.length).toBe(3);
     expect(events[2].type).toBe(ADDON_CONFIG_UPDATED);
@@ -201,7 +670,7 @@ test('should store ADDON_CONFIG_UPDATE event', async () => {
 });
 
 test('should store ADDON_CONFIG_REMOVE event', async () => {
-    const { addonService, stores } = getSetup();
+    const { addonService, eventService } = getSetup();
 
     const config: IAddonDto = {
         provider: 'simple',
@@ -214,15 +683,15 @@ test('should store ADDON_CONFIG_REMOVE event', async () => {
         events: [FEATURE_CREATED],
     };
 
-    const addonConfig = await addonService.createAddon(config, 'me@mail.com');
+    const addonConfig = await addonService.createAddon(config, TEST_AUDIT_USER);
 
-    await addonService.removeAddon(addonConfig.id, 'me@mail.com');
+    await addonService.removeAddon(addonConfig.id, TEST_AUDIT_USER);
 
-    const events = await stores.eventStore.getEvents();
+    const { events } = await eventService.getEvents();
 
     expect(events.length).toBe(3);
     expect(events[2].type).toBe(ADDON_CONFIG_DELETED);
-    expect(events[2].data.id).toBe(addonConfig.id);
+    expect(events[2].preData.id).toBe(addonConfig.id);
 });
 
 test('should hide sensitive fields when fetching', async () => {
@@ -240,7 +709,10 @@ test('should hide sensitive fields when fetching', async () => {
         events: [FEATURE_CREATED],
     };
 
-    const createdConfig = await addonService.createAddon(config, 'me@mail.com');
+    const createdConfig = await addonService.createAddon(
+        config,
+        TEST_AUDIT_USER,
+    );
     const addons = await addonService.getAddons();
     const addonRetrieved = await addonService.getAddon(createdConfig.id);
 
@@ -265,14 +737,14 @@ test('should not overwrite masked values when updating', async () => {
         description: '',
     };
 
-    const addonConfig = await addonService.createAddon(config, 'me@mail.com');
+    const addonConfig = await addonService.createAddon(config, TEST_AUDIT_USER);
 
     const updated = {
         ...addonConfig,
         parameters: { url: MASKED_VALUE, var: 'some-new-value' },
         description: 'test',
     };
-    await addonService.updateAddon(addonConfig.id, updated, 'me@mail.com');
+    await addonService.updateAddon(addonConfig.id, updated, TEST_AUDIT_USER);
 
     const updatedConfig = await stores.addonStore.get(addonConfig.id);
     // @ts-ignore
@@ -295,7 +767,7 @@ test('should reject addon config with missing required parameter when creating',
     };
 
     await expect(async () =>
-        addonService.createAddon(config, 'me@mail.com'),
+        addonService.createAddon(config, TEST_AUDIT_USER),
     ).rejects.toThrow(ValidationError);
 });
 
@@ -313,14 +785,14 @@ test('should reject updating addon config with missing required parameter', asyn
         description: '',
     };
 
-    const config = await addonService.createAddon(addonConfig, 'me@mail.com');
+    const config = await addonService.createAddon(addonConfig, TEST_AUDIT_USER);
     const updated = {
         ...config,
         parameters: { var: 'some-new-value' },
         description: 'test',
     };
     await expect(async () =>
-        addonService.updateAddon(config.id, updated, 'me@mail.com'),
+        addonService.updateAddon(config.id, updated, TEST_AUDIT_USER),
     ).rejects.toThrow(ValidationError);
 });
 
@@ -339,6 +811,6 @@ test('Should reject addon config if a required parameter is just the empty strin
     };
 
     await expect(async () =>
-        addonService.createAddon(config, 'me@mail.com'),
+        addonService.createAddon(config, TEST_AUDIT_USER),
     ).rejects.toThrow(ValidationError);
 });

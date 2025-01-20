@@ -1,64 +1,75 @@
 <div align="center">
 
-<a href="https://getunleash.io" title="Unleash - Create with freedom. Release with confidence">
-    <img src="./.github/github_header_opaque_landscape.svg" alt="The Unleash website">
+<a href="https://getunleash.io" title="Unleash - Empowering developers to release with confidence">
+    <img src="./.github/github_header_opaque_landscape.svg" alt="Visit the Unleash website">
 </a>
 
 <br/>
 <br/>
-    
-[![Build and Tests](https://img.shields.io/github/workflow/status/unleash/unleash/Build%20%26%20Tests)](https://github.com/Unleash/unleash/actions/workflows/build.yaml)
-[![Coverage Status](https://coveralls.io/repos/github/Unleash/unleash/badge.svg?branch=main&)](https://coveralls.io/github/Unleash/unleash?branch=main) [![npm](https://img.shields.io/npm/v/unleash-server)](https://www.npmjs.com/package/unleash-server)
-[![Docker Pulls](https://img.shields.io/docker/pulls/unleashorg/unleash-server)](https://hub.docker.com/r/unleashorg/unleash-server)
-[![Apache-2.0 license](https://img.shields.io/github/license/unleash/unleash)](https://github.com/Unleash/unleash/blob/main/LICENSE)
-[![Join Unleash on Slack](https://img.shields.io/badge/slack-join-635dc5?logo=slack)](https://slack.unleash.run)
+
+[![Build and Tests](https://img.shields.io/github/actions/workflow/status/Unleash/unleash/build.yaml?branch=main)](https://github.com/Unleash/unleash/actions/workflows/build.yaml) [![Coverage Status](https://coveralls.io/repos/github/Unleash/unleash/badge.svg?branch=main)](https://coveralls.io/github/Unleash/unleash?branch=main) [![Docker Pulls](https://img.shields.io/docker/pulls/unleashorg/unleash-server)](https://hub.docker.com/r/unleashorg/unleash-server) [![Apache-2.0 license](https://img.shields.io/github/license/unleash/unleash)](https://github.com/Unleash/unleash/blob/main/LICENSE) [![Join Unleash on Slack](https://img.shields.io/badge/slack-join-635dc5?logo=slack)](https://slack.unleash.run)
+
+[Experience Unleash Live Demo →](https://www.getunleash.io/interactive-demo)
 
 </div>
 
-## About Unleash
+## What is Unleash?
 
-Unleash is an open source feature management solution. It improves the workflow of your development team and leads to quicker software delivery. Unleash increases efficiency and gives teams *full control* of how and when they enable new functionality for end users. Unleash lets teams ship code to production in *smaller* releases *whenever* they want.
+Unleash is a powerful open-source solution for feature management. It streamlines your development workflow, accelerates software delivery, and empowers teams to control how and when they roll out new features to end users. With Unleash, you can deploy code to production in smaller, more manageable releases at your own pace.
 
-Feature toggles make it easy to test how your code works with real production data without the fear that you'll accidentally break your users' experience. It also helps your team work on multiple features in parallel without each maintaining an separate feature branch.
+Feature flags in Unleash let you test your code with real production data, reducing the risk of negatively impacting your users' experience. It also enables your team to work on multiple features simultaneously without the need for separate feature branches.
 
-Unleash is the largest open source solution for feature flagging on GitHub. There's 12 official client and server SDKs and 10+ community SDKs available; you can even make your own if you want to. You can use Unleash with any language and any framework.
+Unleash is the most popular open-source solution for feature flagging on GitHub. It supports 15 official client and server SDKs and over 15 community SDKs. You can even create your own SDK if you wish. Unleash is compatible with any language and framework.
 
 <br/>
 
-## Get started in 2 steps
+## Get started with Unleash
 
-### 1. Start Unleash
+### Set up Unleash
 
-With [`git`](https://git-scm.com/) and [`docker`](https://www.docker.com/) installed, it's easy to get started:
+To get started with Unleash, you can either explore [Unleash Enterprise](#set-up-unleash-enterprise) with a free trial or [get started locally](#set-up-unleash-locally) with our open-source solution.
 
-Run this script:
-``` bash
-git clone git@github.com:Unleash/unleash-docker.git
-cd unleash-docker
+#### Unleash Enterprise
+
+To start with Unleash Enterprise, [request a free trial](https://www.getunleash.io/plans/enterprise-payg?utm_source=oss&utm_medium=readme&utm_content=unleash-enterprise-start). This gives you access to a hosted instance with unlimited projects and environments and features such as [role-based access control](https://docs.getunleash.io/reference/rbac), [change requests](https://docs.getunleash.io/reference/change-requests), [single sign-on](https://docs.getunleash.io/reference/sso), and [SCIM](https://docs.getunleash.io/reference/scim) for automatic user provisioning.
+
+#### Unleash Open Source
+
+To set up Unleash locally, you'll need [`git`](https://git-scm.com/) and [`docker`](https://www.docker.com/) installed on your machine.
+
+Execute the following commands:
+
+```bash
+git clone git@github.com:Unleash/unleash.git
+cd unleash
 docker compose up -d
 ```
 
 Then point your browser to `localhost:4242` and log in using:
-  - username: `admin`
-  - password: `unleash4all`
 
-### 2. Connect your SDK
+- username: `admin`
+- password: `unleash4all`
+
+If you'd rather run the source code in this repo directly via Node.js, see the [step-by-step instructions to get up and running in the contributing guide](./CONTRIBUTING.md#how-to-run-the-project).
+
+### Connect your SDK
 
 Find your preferred SDK in [our list of official SDKs](#unleash-sdks) and import it into your project. Follow the setup guides for your specific SDK.
 
 If you use the docker compose file from the previous step, here's the configuration details you'll need to get going:
+
 - For front-end SDKs, use:
-  - URL: `http://localhost:3000`
-  - `clientKey`: `proxy-client-key`
+  - URL: `http://localhost:4242/api/frontend/`
+  - `clientKey`: `default:development.unleash-insecure-frontend-api-token`
 - For server-side SDKs, use:
-  - Unleash API URL: `http://localhost:4242`
+  - Unleash API URL: `http://localhost:4242/api/`
   - API token: `default:development.unleash-insecure-api-token`
 
 If you use a different setup, your configuration details will most likely also be different.
 
-### Check a feature toggle
+### Check a feature flag
 
-Checking the state of a feature toggle in your code is easy! The syntax will vary depending on your language, but all you need is a simple function call to check whether a toggle is available. Here's how it might look in Java:
+Checking the state of a feature flag in your code is easy! The syntax will vary depending on your language, but all you need is a simple function call to check whether a flag is available. Here's how it might look in Java:
 
 ```java
 if (unleash.isEnabled("AwesomeFeature")) {
@@ -76,7 +87,7 @@ If you don't want to run Unleash locally, we also provide easy deployment setups
 
 ### Configure and run Unleash anywhere
 
-The above sections show you how to get up and running quickly and easily. When you're ready to start configuring and customizing Unleash for your own environment, check out the documentation for [getting started with self-managed deployments](https://docs.getunleash.io/deploy/getting_started), [Unleash configuration options](https://docs.getunleash.io/deploy/configuring_unleash), or [running Unleash locally via docker](https://docs.getunleash.io/user_guide/quickstart#i-want-to-run-unleash-locally).
+The above sections show you how to get up and running quickly and easily. When you're ready to start configuring and customizing Unleash for your own environment, check out the documentation for [getting started with self-managed deployments](https://docs.getunleash.io/reference/deploy/getting-started), [Unleash configuration options](https://docs.getunleash.io/reference/deploy/configuring-unleash), or [running Unleash locally via docker](https://docs.getunleash.io/tutorials/quickstart).
 
 <br/>
 
@@ -84,7 +95,7 @@ The above sections show you how to get up and running quickly and easily. When y
 
 Try out [the Unleash online demo](https://www.getunleash.io/interactive-demo).
 
-![The Unleash UI. It shows a project and its users, feature toggles and tabs for health, access, and environments.](./.github/github_online_demo.svg)
+[![The Unleash online demo](./.github/github_online_demo.svg)](https://www.getunleash.io/interactive-demo)
 
 <br/>
 
@@ -100,15 +111,23 @@ We know that learning a new tool can be hard and time-consuming. We have a growi
 
 📚 [Visit the documentation](https://docs.getunleash.io/) for more in-depth descriptions, how-to guides, and more.
 
+📖 Learn more about the principles of building and scaling [feature flag](https://docs.getunleash.io/topics/feature-flags/feature-flag-best-practices) solutions.
+
 <br/>
 
 ## Contribute to Unleash
 
-Building Unleash is a collaborative effort, and we owe a lot of gratitude to many smart and talented individuals.
-Building it together with community ensures that we build a product that solves real problems for real people.
-We'd love to have your help too: Please feel free to open issues or provide pull requests.
+Unleash is the largest [open-source feature flag solution](https://www.getunleash.io/) on GitHub. Building Unleash is a collaborative effort, and we owe a lot of gratitude to many smart and talented individuals. Building it together with the community ensures that we build a product that solves real problems for real people. We'd love to have your help too: Please feel free to open issues or provide pull requests.
 
 Check out [the CONTRIBUTING.md file](./CONTRIBUTING.md) for contribution guidelines and the [Unleash developer guide](./website/docs/contributing/developer-guide.md) for tips on environment setup, running the tests, and running Unleash from source.
+
+### Contributors
+
+<div align="center">
+
+[![The Unleash contributors](https://cdn.getunleash.io/docs-assets/contributors.svg)](https://github.com/Unleash/unleash/graphs/contributors)
+
+</div>
 
 <br/>
 
@@ -116,18 +135,17 @@ Check out [the CONTRIBUTING.md file](./CONTRIBUTING.md) for contribution guideli
 
 ### Flexibility and adaptability
 
-- Get an easy overview of all feature toggles across all your environments, applications and services
-- Use included [activation strategies](https://docs.getunleash.io/user_guide/activation_strategy) for most common use cases, or use a [custom activation strategy](https://docs.getunleash.io/advanced/custom_activation_strategy) to support any need you might have
-- Organise feature toggles by [feature toggle tags](https://docs.getunleash.io/advanced/tags)
-- [Canary releases / gradual rollouts](https://docs.getunleash.io/user_guide/activation_strategy#gradual-rollout)
-- Targeted releases: release features to specific [users](https://docs.getunleash.io/user_guide/activation_strategy#userids), [IPs](https://docs.getunleash.io/user_guide/activation_strategy#ips), or [hostnames](https://docs.getunleash.io/user_guide/activation_strategy#hostnames)
-- [Kill switches](https://docs.getunleash.io/advanced/feature_toggle_types#feature-toggle-types)
-- [A/B testing](https://docs.getunleash.io/topics/a-b-testing)
-- 2 [environments](https://docs.getunleash.io/user_guide/environments)
+- Get an overview of all feature flags across all your environments, applications and services
+- Targeted releases using [activation strategies](https://docs.getunleash.io/reference/activation-strategies) to enable and disable features for certain users or segments without having to redeploy your application.
+- [Canary releases / gradual rollouts](https://docs.getunleash.io/reference/activation-strategies#gradual-rollout)
+- [Kill switches](https://docs.getunleash.io/reference/feature-toggles#feature-flag-types)
+- [A/B testing](https://docs.getunleash.io/feature-flag-tutorials/use-cases/a-b-testing)
+- 2 [environments](https://docs.getunleash.io/reference/environments)
+- Organize feature flags using [tags](https://docs.getunleash.io/reference/feature-toggles#tags)
 - Out-of-the-box integrations with popular tools ([Slack](https://docs.getunleash.io/addons/slack), [Microsoft Teams](https://docs.getunleash.io/addons/teams), [Datadog](https://docs.getunleash.io/addons/datadog)) + integrate with anything with [webhooks](https://docs.getunleash.io/addons/webhook)
-- [Dashboard for managing technical debt](https://docs.getunleash.io/user_guide/technical_debt) and [stale toggles](https://docs.getunleash.io/user_guide/technical_debt#stale-and-potentially-stale-toggles)
-- API-first: *everything* can be automated. No exceptions.
-- [12 official client SDKs](https://docs.getunleash.io/sdks#official-sdks), and ten [community-contributed client SDKs](https://docs.getunleash.io/sdks#community-sdks)
+- [Insights for managing technical debt](https://docs.getunleash.io/reference/technical-debt) and [stale flags](https://docs.getunleash.io/reference/technical-debt#stale-and-potentially-stale-flags)
+- API-first: _everything_ can be automated. No exceptions.
+- [12 official client SDKs](https://docs.getunleash.io/reference/sdks#official-sdks), and 10 [community-contributed client SDKs](https://docs.getunleash.io/reference/sdks#community-sdks)
 - Run it via Docker with the [official Docker image](https://hub.docker.com/r/unleashorg/unleash-server) or as a pure Node.js application
 
 ### Security and performance
@@ -135,18 +153,19 @@ Check out [the CONTRIBUTING.md file](./CONTRIBUTING.md) for contribution guideli
 - Privacy by design (GDPR and Schrems II). End-user data never leaves your application.
 - [Audit logs](https://docs.getunleash.io/advanced/audit_log)
 - Enforce [OWASP's secure headers](https://owasp.org/www-project-secure-headers/) via the strict HTTPS-only mode
-- Flexible hosting options: host it on premise or in the cloud (*any* cloud)
-- Scale [the Unleash Proxy](https://docs.getunleash.io/sdks/unleash-proxy) independently of the Unleash server to support any number of front-end clients without overloading your Unleash instance
+- Flexible hosting options: host it on premise or in the cloud (_any_ cloud)
+- Scale with [Unleash Edge](https://docs.getunleash.io/reference/unleash-edge) independently of the Unleash server to support any number of front-end clients without overloading your Unleash instance
 
 ### Looking for more features?
 
 If you're looking for one of the following features, please take a look at our [Pro and Enterprise plans](https://www.getunleash.io/plans):
-- [role-based access control (RBAC)](https://docs.getunleash.io/user_guide/rbac)
-- [single sign-on (SSO)](https://docs.getunleash.io/advanced/enterprise-authentication)
+
+- [role-based access control (RBAC)](https://docs.getunleash.io/reference/rbac)
+- [single sign-on (SSO)](https://docs.getunleash.io/reference/sso)
 - more environments
-- [feature toggles project support](https://docs.getunleash.io/user_guide/projects)
+- [feature flags project support](https://docs.getunleash.io/reference/projects)
 - [advanced segmentation](https://docs.getunleash.io/reference/segments)
-- [additional strategy constraints](https://docs.getunleash.io/advanced/strategy_constraints)
+- [additional strategy constraints](https://docs.getunleash.io/reference/activation-strategies#constraints)
 - tighter security
 - more hosting options (we can even host it for you!)
 
@@ -154,9 +173,9 @@ If you're looking for one of the following features, please take a look at our [
 
 ## Architecture
 
-<img src="./.github/Unleash_architecture.svg" title="Unleash System Overview" />
+<img src="./website/static/img/unleash-architecture-edge.png" title="Unleash System Overview" />
 
-Read more in the [*system overview* section of the Unleash documentation](https://docs.getunleash.io/user_guide/unleash_overview#system-overview).
+Read more in the [_system overview_ section of the Unleash documentation](https://docs.getunleash.io/understanding-unleash/unleash-overview#system-overview).
 
 <br/>
 
@@ -166,27 +185,30 @@ To connect your application to Unleash you'll need to use a client SDK for your 
 
 **Official server-side SDKs:**
 
-- [Go SDK](https://docs.getunleash.io/sdks/go_sdk)
-- [Java SDK](https://docs.getunleash.io/sdks/java_sdk)
-- [Node.js SDK](https://docs.getunleash.io/sdks/node_sdk)
-- [PHP SDK](https://docs.getunleash.io/sdks/php_sdk)
-- [Python SDK](https://docs.getunleash.io/sdks/python_sdk)
-- [Ruby SDK](https://docs.getunleash.io/sdks/ruby_sdk)
+- [Go SDK](https://docs.getunleash.io/reference/sdks/go)
+- [Java SDK](https://docs.getunleash.io/reference/sdks/java)
+- [Node.js SDK](https://docs.getunleash.io/reference/sdks/node)
+- [PHP SDK](https://docs.getunleash.io/reference/sdks/php)
+- [Python SDK](https://docs.getunleash.io/reference/sdks/python)
+- [Ruby SDK](https://docs.getunleash.io/reference/sdks/ruby)
 - [Rust SDK](https://github.com/unleash/unleash-client-rust)
-- [.NET SDK](https://docs.getunleash.io/sdks/dot_net_sdk)
+- [.NET SDK](https://docs.getunleash.io/reference/sdks/dotnet)
 
 **Official front-end SDKs:**
 
-The front-end SDKs connects via the [Unleash Proxy](https://docs.getunleash.io/sdks/unleash-proxy) in order to ensure privacy, scalability and security.
+The front-end SDKs connect via [Unleash Edge](https://docs.getunleash.io/reference/unleash-edge) in order to ensure privacy, scalability and security.
 
-- [Android SDK](https://docs.getunleash.io/sdks/android_proxy_sdk)
-- [Javascript SDK](https://docs.getunleash.io/sdks/proxy-javascript)
-- [React SDK](https://docs.getunleash.io/sdks/proxy-react)
-- [iOS SDK](https://docs.getunleash.io/sdks/proxy-ios)
+- [Android Proxy SDK](https://docs.getunleash.io/reference/sdks/android-proxy)
+- [Flutter Proxy SDK](https://docs.getunleash.io/reference/sdks/flutter)
+- [iOS Proxy SDK](https://docs.getunleash.io/reference/sdks/ios-proxy)
+- [JavaScript Proxy SDK](https://docs.getunleash.io/reference/sdks/javascript-browser)
+- [React Proxy SDK](https://docs.getunleash.io/reference/sdks/react)
+- [Svelte Proxy SDK](https://docs.getunleash.io/reference/sdks/svelte)
+- [Vue Proxy SDK](https://docs.getunleash.io/reference/sdks/vue)
 
 **Community SDKs:**
 
-If none of the official SDKs fit your need, there's also a number of [community-developed SDKs](https://docs.getunleash.io/sdks#community-sdks) where you might find an implementation for your preferred language (such as  [Elixir](https://gitlab.com/afontaine/unleash_ex), [Dart](https://pub.dev/packages/unleash), [Clojure](https://github.com/AppsFlyer/unleash-client-clojure), and more).
+If none of the official SDKs fit your need, there's also a number of [community-developed SDKs](https://docs.getunleash.io/reference/sdks#community-sdks) where you might find an implementation for your preferred language (such as [Elixir](https://gitlab.com/afontaine/unleash_ex), [Dart](https://pub.dev/packages/unleash), [Clojure](https://github.com/AppsFlyer/unleash-client-clojure), and more).
 
 <br/>
 
@@ -200,20 +222,26 @@ If none of the official SDKs fit your need, there's also a number of [community-
 
 <br/>
 
+## Migration guides
+
+Unleash has evolved significantly over the past few years, and we know how hard it can be to keep software up to date. If you're using the current major version, upgrading shouldn't be an issue. If you're on a previous major version, check out the [Unleash migration guide](https://docs.getunleash.io/deploy/migration_guide)!
+
+<br/>
+
 ## Want to know more about Unleash?
 
 ### Videos and podcasts
 
 - [The Unleash YouTube channel](https://www.youtube.com/channel/UCJjGVOc5QBbEje-r7nZEa4A)
-- [*Feature toggles — Why and how to add to your software* — freeCodeCamp (YouTube)](https://www.youtube.com/watch?v=-yHZ9uLVSp4&t=0s)
-- [*Feature flags with Unleash* — The Code Kitchen (podcast)](https://share.fireside.fm/episode/zD-4e4KI+Pr379KBv)
-- [*Feature Flags og Unleash med Fredrik Oseberg* — Utviklerpodden (podcast; Norwegian)](https://pod.space/utviklerpodden/feature-flags-og-unleash-med-fredrik-oseberg)
+- [_Feature toggles — Why and how to add to your software_ — freeCodeCamp (YouTube)](https://www.youtube.com/watch?v=-yHZ9uLVSp4&t=0s)
+- [_Feature flags with Unleash_ — The Code Kitchen (podcast)](https://share.fireside.fm/episode/zD-4e4KI+Pr379KBv)
+- [_Feature Flags og Unleash med Fredrik Oseberg_ — Utviklerpodden (podcast; Norwegian)](https://pod.space/utviklerpodden/feature-flags-og-unleash-med-fredrik-oseberg)
 
 ### Articles and more
 
 - [The Unleash Blog](https://www.getunleash.io/blog)
-- [*Designing the Rust Unleash API client* — Medium](https://medium.com/cognite/designing-the-rust-unleash-api-client-6809c95aa568)
-- [*FeatureToggle* by Martin Fowler](http://martinfowler.com/bliki/FeatureToggle.html)
-- [*Feature toggling transient errors in load tests* — nrkbeta](https://nrkbeta.no/2021/08/23/feature-toggling-transient-errors-in-load-tests/)
-- [*An Interview with Ivar of Unleash* — Console](https://console.substack.com/p/console-42)
-- [*Unleash your features gradually*](http://ivarconr.github.io/feature-toggles-presentation/sch-dev-lunch-2017/#1 " "), slideshow/presentation by Ivar, the creator of Unleash
+- [_Designing the Rust Unleash API client_ — Medium](https://medium.com/cognite/designing-the-rust-unleash-api-client-6809c95aa568)
+- [_FeatureToggle_ by Martin Fowler](http://martinfowler.com/bliki/FeatureToggle.html)
+- [_Feature toggling transient errors in load tests_ — nrkbeta](https://nrkbeta.no/2021/08/23/feature-toggling-transient-errors-in-load-tests/)
+- [_An Interview with Ivar of Unleash_ — Console](https://console.substack.com/p/console-42)
+- [_Unleash your features gradually_](http://ivarconr.github.io/feature-toggles-presentation/sch-dev-lunch-2017/#1 ' '), slideshow/presentation by Ivar, the creator of Unleash

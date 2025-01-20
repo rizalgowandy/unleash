@@ -1,4 +1,4 @@
-name: Build & Tests
+name: Build, Lint & Tests
 
 on:
   push:
@@ -6,14 +6,17 @@ on:
       - main
     paths-ignore:
       - website/**
-
+      - coverage/**
+  pull_request:
+    paths-ignore:
+      - frontend/**
+      - website/**
+      - coverage/**
 jobs:
   build:
     runs-on: ubuntu-latest
+    name: build
 
-    strategy:
-      matrix:
-        node-version: [14.x, 16.x]
     services:
       # Label used to access the service container
       postgres:
@@ -22,28 +25,36 @@ jobs:
         # Provide the password for postgres
         env:
           POSTGRES_PASSWORD: postgres
+          POSTGRES_INITDB_ARGS: "--no-sync"
         # Set health checks to wait until postgres has started
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+
     steps:
-    - uses: actions/checkout@v3
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
-      with:
-        node-version: ${{ matrix.node-version }}
-    - run: yarn
-    - run: yarn lint
-    - run: yarn run test:coverage
-      env:
-        CI: true
-        TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-    - name: Coveralls
-      uses: coverallsapp/github-action@master
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'yarn'
+      - name: Enable corepack
+        run: corepack enable
+      - run: yarn install --immutable
+        env:
+          YARN_ENABLE_SCRIPTS: false
+      - run: yarn lint
+      - run: yarn build:backend
+      - run: yarn run test:report # This adds test results as github check to the workflow
+        env:
+          CI: true
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      - name: Upload test report to build # Done this way since external PRs would not be able to write the check. See https://github.com/marketplace/actions/test-reporter#recommended-setup-for-public-repositories
+        uses: actions/upload-artifact@v4
+        if: (success() || failure()) && github.ref == 'refs/heads/main'
+        with:
+          name: test-results
+          path: ./reports/jest-junit.xml

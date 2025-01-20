@@ -1,35 +1,52 @@
-import { Request, Response } from 'express';
-import { IUnleashConfig } from '../types/option';
-import { IUnleashServices } from '../types/services';
-import { Logger } from '../logger';
-import HealthService from '../services/health-service';
+import type { Request, Response } from 'express';
+import type { IUnleashConfig } from '../types/option';
+import type { IUnleashServices } from '../types/services';
+import type { Logger } from '../logger';
+import type { OpenApiService } from '../services/openapi-service';
 
-const Controller = require('./controller');
+import Controller from './controller';
+import { NONE } from '../types/permissions';
+import { createResponseSchema } from '../openapi/util/create-response-schema';
+import type { HealthCheckSchema } from '../openapi/spec/health-check-schema';
 
-class HealthCheckController extends Controller {
+export class HealthCheckController extends Controller {
     private logger: Logger;
 
-    private healthService: HealthService;
+    private openApiService: OpenApiService;
 
     constructor(
         config: IUnleashConfig,
-        { healthService }: Pick<IUnleashServices, 'healthService'>,
+        { openApiService }: Pick<IUnleashServices, 'openApiService'>,
     ) {
         super(config);
         this.logger = config.getLogger('health-check.js');
-        this.healthService = healthService;
-        this.get('/', (req, res) => this.index(req, res));
+        this.openApiService = openApiService;
+
+        this.route({
+            method: 'get',
+            path: '',
+            handler: this.getHealth,
+            permission: NONE,
+            middleware: [
+                openApiService.validPath({
+                    tags: ['Operational'],
+                    operationId: 'getHealth',
+                    summary: 'Get instance operational status',
+                    description:
+                        'This operation returns information about whether this Unleash instance is healthy and ready to serve requests or not. Typically used by your deployment orchestrator (e.g. Kubernetes, Docker Swarm, Mesos, et al.).',
+                    responses: {
+                        200: createResponseSchema('healthCheckSchema'),
+                        500: createResponseSchema('healthCheckSchema'),
+                    },
+                }),
+            ],
+        });
     }
 
-    async index(req: Request, res: Response): Promise<void> {
-        try {
-            await this.healthService.dbIsUp();
-            res.json({ health: 'GOOD' });
-        } catch (e) {
-            this.logger.error('Could not select from features, error was: ', e);
-            res.status(500).json({ health: 'BAD' });
-        }
+    async getHealth(
+        _: Request,
+        res: Response<HealthCheckSchema>,
+    ): Promise<void> {
+        res.status(200).json({ health: 'GOOD' });
     }
 }
-export default HealthCheckController;
-module.exports = HealthCheckController;

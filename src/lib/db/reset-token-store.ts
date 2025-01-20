@@ -1,16 +1,16 @@
-import { EventEmitter } from 'events';
-import { Knex } from 'knex';
+import type { EventEmitter } from 'events';
 import metricsHelper from '../util/metrics-helper';
 import { DB_TIME } from '../metric-events';
-import { Logger, LogProvider } from '../logger';
+import type { Logger, LogProvider } from '../logger';
 import NotFoundError from '../error/notfound-error';
-import {
+import type {
     IResetQuery,
     IResetToken,
     IResetTokenCreate,
     IResetTokenQuery,
     IResetTokenStore,
 } from '../types/stores/reset-token-store';
+import type { Db } from './db';
 
 const TABLE = 'reset_tokens';
 
@@ -37,9 +37,9 @@ export class ResetTokenStore implements IResetTokenStore {
 
     private timer: Function;
 
-    private db: Knex;
+    private db: Db;
 
-    constructor(db: Knex, eventBus: EventEmitter, getLogger: LogProvider) {
+    constructor(db: Db, eventBus: EventEmitter, getLogger: LogProvider) {
         this.db = db;
         this.logger = getLogger('db/reset-token-store.ts');
         this.timer = (action: string) =>

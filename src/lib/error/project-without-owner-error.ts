@@ -1,23 +1,21 @@
-export default class ProjectWithoutOwnerError extends Error {
-    constructor() {
-        super();
-        Error.captureStackTrace(this, this.constructor);
+import { type ApiErrorSchema, UnleashError } from './unleash-error';
 
-        this.name = this.constructor.name;
-        this.message = 'A project must have at least one owner';
+export default class ProjectWithoutOwnerError extends UnleashError {
+    statusCode = 409;
+
+    constructor() {
+        super('A project must have at least one owner');
     }
 
-    toJSON(): any {
-        const obj = {
-            isJoi: true,
-            name: this.constructor.name,
+    toJSON(): ApiErrorSchema {
+        return {
+            ...super.toJSON(),
             details: [
                 {
-                    validationErrors: [],
                     message: this.message,
+                    validationErrors: [],
                 },
             ],
         };
-        return obj;
     }
 }

@@ -1,20 +1,29 @@
-import { Knex } from 'knex';
-import { Logger, LogProvider } from '../logger';
-import { ISettingStore } from '../types/stores/settings-store';
+import type { Logger, LogProvider } from '../logger';
+import type { ISettingStore } from '../types/stores/settings-store';
+import type { Db } from './db';
 
 const TABLE = 'settings';
 
 export default class SettingStore implements ISettingStore {
-    private db: Knex;
+    private db: Db;
 
     private logger: Logger;
 
-    constructor(db: Knex, getLogger: LogProvider) {
+    constructor(db: Db, getLogger: LogProvider) {
         this.db = db;
         this.logger = getLogger('settings-store.ts');
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
+    async postgresVersion(): Promise<string> {
+        try {
+            const showResult = await this.db.raw('SHOW server_version');
+            return showResult?.rows[0]?.server_version || '';
+        } catch (e) {
+            this.logger.warn('Failed to fetch postgres version', e);
+            return '';
+        }
+    }
+
     async updateRow(name: string, content: any): Promise<void> {
         return this.db(TABLE)
             .where('name', name)
@@ -23,7 +32,6 @@ export default class SettingStore implements ISettingStore {
             });
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
     async insertNewRow(name: string, content: any) {
         return this.db(TABLE).insert({ name, content });
     }
@@ -37,8 +45,12 @@ export default class SettingStore implements ISettingStore {
         return present;
     }
 
-    async get(name: string): Promise<any> {
-        const result = await this.db.select().from(TABLE).where('name', name);
+    async get<T>(name: string): Promise<T | undefined> {
+        const result = await this.db
+            .select()
+            .from(TABLE)
+            .where('name', name)
+            .limit(1);
 
         if (result.length > 0) {
             return result[0].content;
@@ -46,7 +58,6 @@ export default class SettingStore implements ISettingStore {
         return undefined;
     }
 
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
     async insert(name: string, content: any): Promise<void> {
         const exists = await this.exists(name);
         if (exists) {

@@ -1,6 +1,7 @@
 import joi from 'joi';
 import { ALL_OPERATORS } from '../util/constants';
 import { nameType } from '../routes/util';
+import { validateJsonString } from '../util/validateJsonString';
 
 export const nameSchema = joi
     .object()
@@ -27,15 +28,41 @@ export const strategiesSchema = joi.object().keys({
     parameters: joi.object(),
 });
 
+export const variantValueSchema = joi
+    .string()
+    .required()
+    // perform additional validation
+    // when provided 'type' is 'json'
+    .when('type', {
+        is: 'json',
+        then: joi.custom((val, helper) => {
+            const isValidJsonString = validateJsonString(val);
+            if (isValidJsonString === false) {
+                return helper.error('invalidJsonString');
+            }
+            return val;
+        }),
+    })
+    .messages({
+        invalidJsonString:
+            "'value' must be a valid json string when 'type' is json",
+    });
+
 export const variantsSchema = joi.object().keys({
     name: nameType,
-    weight: joi.number().min(0).max(1000).required(),
+    weight: joi
+        .number()
+        .integer()
+        .message('Weight only supports 1 decimal')
+        .min(0)
+        .max(1000)
+        .required(),
     weightType: joi.string().valid('variable', 'fix').default('variable'),
     payload: joi
         .object()
         .keys({
             type: joi.string().required(),
-            value: joi.string().required(),
+            value: variantValueSchema,
         })
         .optional(),
     stickiness: joi.string().default('default'),
@@ -71,6 +98,22 @@ export const featureMetadataSchema = joi
             .default(false)
             .optional(),
         createdAt: joi.date().optional().allow(null),
+        variants: joi
+            .array()
+            .allow(null)
+            .unique((a, b) => a.name === b.name)
+            .optional()
+            .items(variantsSchema),
+        tags: joi
+            .array()
+            .optional()
+            .items(
+                joi.object().keys({
+                    type: joi.string().required(),
+                    value: joi.string().required(),
+                }),
+            ),
+        createdByUserId: joi.number(),
     })
     .options({ allowUnknown: false, stripUnknown: true, abortEarly: false });
 
@@ -116,6 +159,7 @@ export const querySchema = joi
         project: joi.array().allow(null).items(nameType).optional(),
         namePrefix: joi.string().allow(null).optional(),
         environment: joi.string().allow(null).optional(),
+        inlineSegmentConstraints: joi.boolean().optional(),
     })
     .options({ allowUnknown: false, stripUnknown: true, abortEarly: false });
 
@@ -125,4 +169,5 @@ export const featureTagSchema = joi.object().keys({
     tagValue: joi.string(),
     type: nameType.optional(),
     value: joi.string().optional(),
+    createdByUserId: joi.number().optional(),
 });

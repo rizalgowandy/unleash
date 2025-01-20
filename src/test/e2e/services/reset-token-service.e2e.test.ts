@@ -1,22 +1,25 @@
-import dbInit from '../helpers/database-init';
+import dbInit, { type ITestDb } from '../helpers/database-init';
 import getLogger from '../../fixtures/no-logger';
 import ResetTokenService from '../../../lib/services/reset-token-service';
 import UserService from '../../../lib/services/user-service';
 import { AccessService } from '../../../lib/services/access-service';
 import { EmailService } from '../../../lib/services/email-service';
-import { IUnleashConfig } from '../../../lib/types/option';
+import type { IUnleashConfig } from '../../../lib/types/option';
 import { createTestConfig } from '../../config/test-config';
 import SessionService from '../../../lib/services/session-service';
 import InvalidTokenError from '../../../lib/error/invalid-token-error';
-import { IUser } from '../../../lib/types/user';
+import type { IUser, IUserWithRootRole } from '../../../lib/types/user';
 import SettingService from '../../../lib/services/setting-service';
 import FakeSettingStore from '../../fixtures/fake-setting-store';
+import { GroupService } from '../../../lib/services/group-service';
+import { type IUnleashStores, TEST_AUDIT_USER } from '../../../lib/types';
+import { createEventsService } from '../../../lib/features';
 
 const config: IUnleashConfig = createTestConfig();
 
-let stores;
-let db;
-let adminUser;
+let stores: IUnleashStores;
+let db: ITestDb;
+let adminUser: IUserWithRootRole;
 let userToCreateResetFor: IUser;
 let userIdToCreateResetFor: number;
 let accessService: AccessService;
@@ -26,32 +29,49 @@ let sessionService: SessionService;
 beforeAll(async () => {
     db = await dbInit('reset_token_service_serial', getLogger);
     stores = db.stores;
-    accessService = new AccessService(stores, config);
+    const eventService = createEventsService(db.rawDatabase, config);
+    const groupService = new GroupService(stores, config, eventService);
+    accessService = new AccessService(
+        stores,
+        config,
+        groupService,
+        eventService,
+    );
     resetTokenService = new ResetTokenService(stores, config);
     sessionService = new SessionService(stores, config);
-    const emailService = new EmailService(undefined, config.getLogger);
+    const emailService = new EmailService(config);
     const settingService = new SettingService(
-        { settingStore: new FakeSettingStore() },
+        {
+            settingStore: new FakeSettingStore(),
+        },
         config,
+        eventService,
     );
 
     userService = new UserService(stores, config, {
         accessService,
         resetTokenService,
         emailService,
+        eventService,
         sessionService,
         settingService,
     });
 
-    adminUser = await userService.createUser({
-        username: 'admin@test.com',
-        rootRole: 1,
-    });
+    adminUser = await userService.createUser(
+        {
+            username: 'admin@test.com',
+            rootRole: 1,
+        },
+        TEST_AUDIT_USER,
+    );
 
-    userToCreateResetFor = await userService.createUser({
-        username: 'test@test.com',
-        rootRole: 2,
-    });
+    userToCreateResetFor = await userService.createUser(
+        {
+            username: 'test@test.com',
+            rootRole: 2,
+        },
+        TEST_AUDIT_USER,
+    );
     userIdToCreateResetFor = userToCreateResetFor.id;
 });
 
@@ -64,7 +84,7 @@ afterAll(async () => {
 test('Should create a reset link', async () => {
     const url = await resetTokenService.createResetPasswordUrl(
         userIdToCreateResetFor,
-        adminUser,
+        adminUser.username!,
     );
 
     expect(url.toString().substring(0, url.toString().indexOf('='))).toBe(
@@ -83,7 +103,7 @@ test('Should create a reset link with unleashUrl with context path', async () =>
 
     const url = await resetToken.createResetPasswordUrl(
         userIdToCreateResetFor,
-        adminUser,
+        adminUser.username,
     );
     expect(url.toString().substring(0, url.toString().indexOf('='))).toBe(
         `${localConfig.server.unleashUrl}/reset-password?token`,
@@ -104,7 +124,7 @@ test('Should create a welcome link', async () => {
 test('Tokens should be one-time only', async () => {
     const token = await resetTokenService.createToken(
         userIdToCreateResetFor,
-        adminUser,
+        adminUser.username,
     );
 
     const accessGranted = await resetTokenService.useAccessToken(token);
@@ -116,11 +136,11 @@ test('Tokens should be one-time only', async () => {
 test('Creating a new token should expire older tokens', async () => {
     const firstToken = await resetTokenService.createToken(
         userIdToCreateResetFor,
-        adminUser,
+        adminUser.username,
     );
     const secondToken = await resetTokenService.createToken(
         userIdToCreateResetFor,
-        adminUser,
+        adminUser.username,
     );
     await expect(async () =>
         resetTokenService.isValid(firstToken.token),
@@ -132,7 +152,7 @@ test('Creating a new token should expire older tokens', async () => {
 test('Retrieving valid invitation links should retrieve an object with userid key and token value', async () => {
     const token = await resetTokenService.createToken(
         userIdToCreateResetFor,
-        adminUser,
+        adminUser.username,
     );
     expect(token).toBeTruthy();
     const activeInvitations = await resetTokenService.getActiveInvitations();

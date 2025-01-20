@@ -1,9 +1,11 @@
-import supertest from 'supertest';
+import supertest, { type Test } from 'supertest';
 import createStores from '../../../test/fixtures/store';
 import permissions from '../../../test/fixtures/permissions';
 import getApp from '../../app';
 import { createTestConfig } from '../../../test/config/test-config';
 import { createServices } from '../../services';
+import type { ITagStore } from '../../types';
+import type TestAgent from 'supertest/lib/agent';
 
 async function getSetup() {
     const base = `/random${Math.round(Math.random() * 1000)}`;
@@ -21,28 +23,18 @@ async function getSetup() {
         perms,
         tagStore: stores.tagStore,
         request: supertest(app),
-        destroy: () => {
-            services.versionService.destroy();
-            services.clientInstanceService.destroy();
-            services.apiTokenService.destroy();
-        },
     };
 }
 
-let base;
-let tagStore;
-let request;
-let destroy;
+let base: string;
+let tagStore: ITagStore;
+let request: TestAgent<Test>;
 
 beforeEach(async () => {
     const setup = await getSetup();
     base = setup.base;
     tagStore = setup.tagStore;
     request = setup.request;
-    destroy = setup.destroy;
-});
-afterEach(() => {
-    destroy();
 });
 
 test('should get empty getTags via admin', () => {
@@ -72,9 +64,9 @@ test('should get all tags added', () => {
         });
 });
 
-test('should be able to get single tag by type and value', () => {
+test('should be able to get single tag by type and value', async () => {
     expect.assertions(1);
-    tagStore.createTag({ value: 'TeamRed', type: 'simple' });
+    await tagStore.createTag({ value: 'TeamRed', type: 'simple' });
     return request
         .get(`${base}/api/admin/tags/simple/TeamRed`)
         .expect('Content-Type', /json/)
